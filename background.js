@@ -81,7 +81,8 @@ async function openRaffleLinks(email, { force = false } = {}) {
 // intervention : inscription -> profil -> 7 participations -> déconnexion ->
 // compte suivant (avec le proxy associé à sa ligne), jusqu'à épuisement de
 // la liste. Piloté par un petit automate stocké dans chrome.storage.local.
-const ACCOUNT_TIMEOUT_MS = 8 * 60 * 1000; // sécurité anti-blocage par compte
+const ACCOUNT_TIMEOUT_MS = 8 * 60 * 1000; // sécurité anti-blocage : inscription/participations
+const LOGOUT_TIMEOUT_MS = 90 * 1000; // sécurité anti-blocage : déconnexion (doit être quasi instantanée)
 
 async function getCampaign() {
   const { campaign } = await storage.get(['campaign']);
@@ -279,17 +280,19 @@ async function checkCampaignWatchdog() {
   const c = await getCampaign();
   if (!c || !c.running) return;
 
-  const started = c.phase === 'logout' ? c.logoutStartedAt || c.startedAccountAt : c.startedAccountAt;
-  if (!started || Date.now() - started < ACCOUNT_TIMEOUT_MS) return;
+  const isLogoutPhase = c.phase === 'logout';
+  const timeout = isLogoutPhase ? LOGOUT_TIMEOUT_MS : ACCOUNT_TIMEOUT_MS;
+  const started = isLogoutPhase ? c.logoutStartedAt || c.startedAccountAt : c.startedAccountAt;
+  if (!started || Date.now() - started < timeout) return;
 
   const acc = c.accounts[c.index];
   await notifyDiscord({
     status: 'error',
     title: '⏱ Compte bloqué — passage forcé au suivant',
     email: acc ? acc.email : '—',
-    item: `Phase : ${c.phase === 'logout' ? 'déconnexion' : 'inscription / participations'}`,
+    item: `Phase : ${isLogoutPhase ? 'déconnexion' : 'inscription / participations'}`,
     progress: `Compte ${c.index + 1}/${c.accounts.length}`,
-    description: `Aucune progression détectée depuis plus de ${Math.round(ACCOUNT_TIMEOUT_MS / 60000)} minutes. Le compte est ignoré, la campagne continue avec le suivant.`,
+    description: `Aucune progression détectée depuis plus de ${Math.round(timeout / 1000)}s. Le compte est ignoré, la campagne continue avec le suivant.`,
   });
 
   if (c.phase === 'logout') {

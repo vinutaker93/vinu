@@ -54,6 +54,23 @@ Discord "⏱ Compte bloqué" le signale. Le bouton **⏹ Arrêter** stoppe la
 campagne à tout moment (le compte en cours va jusqu'au bout de sa page
 actuelle, rien n'est coupé en plein clic).
 
+## Ce qui a changé (v2.2)
+
+### Correctif : la campagne restait bloquée sans se déconnecter
+- Le lien « Se déconnecter » est parfois géré par le thème comme un **onglet**
+  (JS qui intercepte le clic, navigation en SPA sans rechargement réel) plutôt
+  que comme un lien classique. Dans ce cas, `logoutLink.click()` ne provoquait
+  **aucun rechargement de page** : le content script ne se relançait jamais et
+  ne pouvait donc jamais confirmer la déconnexion au background — la campagne
+  restait figée indéfiniment sur le compte en cours.
+- Correction : la déconnexion se fait maintenant par **navigation directe**
+  (`location.href = lien`) plutôt que par un clic simulé, ce qui force un vrai
+  changement de page quel que soit le gestionnaire JS posé sur le lien.
+- Le filet de sécurité (watchdog) pour la phase de déconnexion est passé de
+  **8 minutes à 90 secondes** — une déconnexion doit être quasi instantanée,
+  inutile d'attendre aussi longtemps qu'une inscription avant de forcer le
+  passage au compte suivant.
+
 ## Ce qui a changé (v2.0)
 
 ### Détection de la case et du bouton

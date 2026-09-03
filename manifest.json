@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pokelite Helper",
-  "version": "2.1",
+  "version": "2.2",
   "description": "Traite automatiquement tous les comptes enregistrés l'un après l'autre (inscription, prénom/nom, proxy dédié, 7 participations, déconnexion, compte suivant), et notifie Discord avec un rapport complet à chaque étape.",
   "permissions": [
     "storage",
