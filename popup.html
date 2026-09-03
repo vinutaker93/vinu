@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px/1.4 sans-serif; width: 300px; padding: 10px; }
+    label { display: block; margin-top: 8px; font-weight: bold; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 4px; margin-top: 2px; }
+    textarea { height: 70px; font: 11px/1.3 monospace; }
+    button { margin-top: 10px; width: 100%; padding: 6px; cursor: pointer; }
+    .row { display: flex; gap: 6px; }
+    .row button { margin-top: 4px; }
+    hr { margin: 12px 0; border: none; border-top: 1px solid #ddd; }
+    #status { margin-top: 8px; font-size: 12px; min-height: 14px; color: #084; }
+    .hint { font-size: 11px; opacity: .7; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <label>Comptes enregistrés (le sélectionné = actif)</label>
+  <select id="emailSelect"><option value="">— aucun —</option></select>
+  <div id="activeProxyInfo" class="hint">Proxy : —</div>
+  <div class="row">
+    <button id="deleteEmail" style="flex:1">Supprimer la sélection</button>
+  </div>
+  <label style="font-weight:normal;font-size:11px;margin-top:6px">
+    <input type="checkbox" id="autoProxy" style="width:auto" /> Activer automatiquement le proxy du compte choisi
+  </label>
+
+  <label>Ajouter / modifier l'email actif</label>
+  <input id="email" placeholder="you@example.com" />
+
+  <label>Importer les emails depuis un fichier .txt (un par ligne)</label>
+  <input type="file" id="emailFile" accept=".txt" />
+
+  <hr />
+
+  <label>Liste de proxies (enregistrée définitivement)</label>
+  <input type="file" id="proxyFile" accept=".txt" />
+  <textarea id="proxyText" placeholder="host:port&#10;host:port:user:pass&#10;user:pass@host:port"></textarea>
+  <div class="row">
+    <button id="saveProxies" style="flex:1">Enregistrer la liste</button>
+    <button id="clearProxies" style="flex:1">Vider la liste</button>
+  </div>
+  <div class="hint">
+    La 1ʳᵉ ligne va au 1ᵉʳ email, la 2ᵉ au 2ᵉ, etc. La liste reste enregistrée :
+    changer de compte ne l'efface plus.
+  </div>
+  <div id="proxyCount" class="hint">0 proxy enregistré.</div>
+
+  <div class="row">
+    <button id="applyProxy" style="flex:1">Activer le proxy du compte actif</button>
+    <button id="clearProxy" style="flex:1">Désactiver (direct)</button>
+  </div>
+
+  <hr />
+
+  <label>Discord webhook URL</label>
+  <input id="webhook" placeholder="https://discord.com/api/webhooks/..." />
+  <div class="row">
+    <button id="testWebhook" style="flex:1">Tester le webhook</button>
+    <button id="flushWebhook" style="flex:1">Renvoyer la file d'attente</button>
+  </div>
+
+  <button id="save">Sauvegarder</button>
+
+  <hr />
+
+  <button id="openLinks">Ouvrir les 7 liens du tirage</button>
+  <button id="resetTracking">Réinitialiser le suivi de ce compte</button>
+
+  <div id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
