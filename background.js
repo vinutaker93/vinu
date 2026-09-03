@@ -198,45 +198,58 @@ function frDateTime(ts) {
   };
 }
 
-function maskProxy(line) {
-  if (!line) return '—';
-  const p = parseProxyLine(line);
-  if (!p) return '—';
-  return p.username ? `${p.host}:${p.port} (auth)` : `${p.host}:${p.port}`;
+// Identité du bot
+const BRAND = 'TIGRE AIO';
+const DEFAULT_LOGO =
+  'https://cdn.discordapp.com/attachments/1023333501312962690/1545161251431121037/image-1788465467838.png?ex=6a9b230e&is=6a99d18e&hm=ca1e5b8efbcba2e08c9b185c0f1bad0faa31b8de25f6261a14500958ed23ac41&';
+
+// Valeur affichée à la place de toute donnée confidentielle.
+const HIDDEN = '///';
+
+// Retire toute trace du site, des URLs et du nom des produits dans les textes
+// libres : rien d'identifiable ne doit sortir dans le webhook.
+function scrub(text) {
+  if (!text) return text;
+  return String(text)
+    .replace(/https?:\/\/\S+/gi, HIDDEN)
+    .replace(/\bwww\.\S+/gi, HIDDEN)
+    .replace(/pokelite(\.fr)?/gi, HIDDEN)
+    .replace(/pok[ée]mon/gi, HIDDEN);
 }
 
-function buildEmbed(payload, proxyLine) {
+function buildEmbed(payload, logoUrl) {
   const ts = payload.timestamp || Date.now();
   const { date, time, iso } = frDateTime(ts);
   const status = payload.status || 'info';
+  const logo = logoUrl || DEFAULT_LOGO;
 
   const fields = [
     { name: '📧 Compte', value: `\`${payload.email || '—'}\``, inline: true },
-    { name: '🌐 Site', value: payload.site || 'pokelite.fr', inline: true },
+    { name: '🌐 Site', value: 'private', inline: true },
     { name: '📌 Statut', value: STATUS_LABEL[status] || status, inline: true },
-    { name: '🎁 Item', value: payload.item || '—', inline: false },
+    { name: '🎁 Produit', value: HIDDEN, inline: true },
   ];
 
-  if (payload.step) fields.push({ name: '🧩 Étape', value: payload.step, inline: true });
+  if (payload.step) fields.push({ name: '🧩 Étape', value: scrub(payload.step), inline: true });
   if (payload.profileName)
     fields.push({ name: '👤 Identité', value: payload.profileName, inline: true });
-  fields.push({ name: '🔌 Proxy', value: maskProxy(proxyLine), inline: true });
+  fields.push({ name: '🔌 Proxy', value: HIDDEN, inline: true });
   fields.push({ name: '📅 Date', value: date, inline: true });
   fields.push({ name: '⏰ Heure', value: `${time} (heure locale)`, inline: true });
   if (payload.progress) fields.push({ name: '📊 Avancement', value: payload.progress, inline: true });
-  if (payload.detail) fields.push({ name: '📝 Détail', value: payload.detail.slice(0, 1000), inline: false });
-  if (payload.url) fields.push({ name: '🔗 Page', value: payload.url.slice(0, 1000), inline: false });
+  if (payload.detail) fields.push({ name: '📝 Détail', value: scrub(payload.detail).slice(0, 1000), inline: false });
 
+  // Aucun lien n'est jamais publié : ni titre cliquable, ni champ « page ».
   const embed = {
-    title: payload.title || STATUS_LABEL[status] || 'Pokelite Helper',
+    author: { name: BRAND, icon_url: logo },
+    title: scrub(payload.title || STATUS_LABEL[status] || BRAND),
     color: COLORS[status] || COLORS.info,
     fields,
-    footer: { text: `Pokelite Helper v2.0 • ${payload.email || 'compte inconnu'}` },
+    thumbnail: { url: logo },
+    footer: { text: `${BRAND} • ${payload.email || 'compte inconnu'}`, icon_url: logo },
     timestamp: iso,
   };
-  if (payload.description) embed.description = payload.description.slice(0, 3800);
-  if (payload.url) embed.url = payload.url;
-  if (payload.image) embed.thumbnail = { url: payload.image };
+  if (payload.description) embed.description = scrub(payload.description).slice(0, 3800);
 
   return embed;
 }
@@ -301,7 +314,7 @@ chrome.alarms.onAlarm.addListener((a) => {
 });
 
 async function notifyDiscord(payload) {
-  const { webhookUrl, activeProxyLine } = await storage.get(['webhookUrl', 'activeProxyLine']);
+  const { webhookUrl, logoUrl } = await storage.get(['webhookUrl', 'logoUrl']);
   if (!webhookUrl) return { ok: false, error: 'Aucun webhook configuré' };
 
   // Anti-doublon : même compte + même page + même statut dans les 15 s.
@@ -318,8 +331,9 @@ async function notifyDiscord(payload) {
   await storage.set({ discordSeen });
 
   const body = {
-    username: 'Pokelite Helper',
-    embeds: [buildEmbed(payload, activeProxyLine)],
+    username: BRAND,
+    avatar_url: logoUrl || DEFAULT_LOGO,
+    embeds: [buildEmbed(payload, logoUrl)],
   };
 
   // 3 tentatives immédiates avec backoff, puis mise en file d'attente.

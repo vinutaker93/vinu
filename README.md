@@ -51,10 +51,15 @@ clic sur « Je participe » et rapport Discord.
 - Formats : `host:port`, `host:port:user:pass`, `user:pass@host:port`, avec
   préfixe de schéma optionnel (`http://`, `socks5://`…).
 
-### Webhook Discord
-- Envoi en **embed complet** : compte, site, statut, item, étape, identité
-  générée, proxy utilisé, date, heure, avancement (n/7), lien de la page,
-  vignette du produit, couleur selon le statut.
+### Webhook Discord — TIGRE AIO
+- Identité **TIGRE AIO** : nom du bot, avatar, icône d'auteur, vignette et
+  icône de footer (URL du logo configurable dans le popup).
+- Embed complet : compte, statut, étape, identité générée, date, heure,
+  avancement (n/7), couleur selon le statut.
+- **Confidentialité** : le champ Site affiche toujours `private`, le produit et
+  le proxy affichent `///`, et **aucun lien n'est publié** (ni titre cliquable,
+  ni champ « page »). Les textes libres sont nettoyés (URLs et noms du site
+  remplacés par `///`).
 - Fiabilité : 3 tentatives immédiates avec backoff, gestion du 429, puis
   **file d'attente persistante** rejouée par alarme — plus aucun message perdu
   si le réseau/proxy tombe ou si le worker est tué.

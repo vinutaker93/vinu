@@ -1,9 +1,14 @@
 const $ = (id) => document.getElementById(id);
 
+// Logo TIGRE AIO par défaut (modifiable dans le popup).
+const DEFAULT_LOGO =
+  'https://cdn.discordapp.com/attachments/1023333501312962690/1545161251431121037/image-1788465467838.png?ex=6a9b230e&is=6a99d18e&hm=ca1e5b8efbcba2e08c9b185c0f1bad0faa31b8de25f6261a14500958ed23ac41&';
+
 const emailEl = $('email');
 const emailSelectEl = $('emailSelect');
 const activeProxyInfoEl = $('activeProxyInfo');
 const webhookEl = $('webhook');
+const logoEl = $('logo');
 const emailFileEl = $('emailFile');
 const proxyFileEl = $('proxyFile');
 const proxyTextEl = $('proxyText');
@@ -31,6 +36,7 @@ async function loadAll() {
     'accounts',
     'savedEmails',
     'webhookUrl',
+    'logoUrl',
     'proxyLines',
     'autoApplyProxy',
   ]);
@@ -52,6 +58,7 @@ async function loadAll() {
     accounts,
     proxyLines,
     webhookUrl: data.webhookUrl || '',
+    logoUrl: data.logoUrl || DEFAULT_LOGO,
     autoApplyProxy: data.autoApplyProxy !== false,
   };
 }
@@ -94,9 +101,10 @@ async function refresh() {
   const state = await refresh();
   emailEl.value = state.myEmail;
   webhookEl.value = state.webhookUrl;
+  logoEl.value = state.logoUrl;
   autoProxyEl.checked = state.autoApplyProxy;
   // On persiste la forme normalisée dès l'ouverture (migration incluse).
-  await store.set({ accounts: state.accounts, proxyLines: state.proxyLines });
+  await store.set({ accounts: state.accounts, proxyLines: state.proxyLines, logoUrl: state.logoUrl });
 })();
 
 // --- Comptes ------------------------------------------------------------
@@ -105,7 +113,13 @@ $('save').addEventListener('click', async () => {
   const webhookUrl = webhookEl.value.trim();
   const { accounts, proxyLines } = await loadAll();
   if (email && !accounts.some((a) => a.email === email)) accounts.push({ email });
-  await store.set({ myEmail: email, accounts, webhookUrl, autoApplyProxy: autoProxyEl.checked });
+  await store.set({
+    myEmail: email,
+    accounts,
+    webhookUrl,
+    logoUrl: logoEl.value.trim() || DEFAULT_LOGO,
+    autoApplyProxy: autoProxyEl.checked,
+  });
   render({ myEmail: email, accounts, proxyLines });
   flashStatus('Sauvegardé.', 1500);
 });
@@ -239,7 +253,7 @@ autoProxyEl.addEventListener('change', () => {
 $('testWebhook').addEventListener('click', async () => {
   const webhookUrl = webhookEl.value.trim();
   if (!webhookUrl) return flashStatus('Renseigne d’abord l’URL du webhook.');
-  await store.set({ webhookUrl });
+  await store.set({ webhookUrl, logoUrl: logoEl.value.trim() || DEFAULT_LOGO });
   const { myEmail } = await loadAll();
   chrome.runtime.sendMessage(
     {
