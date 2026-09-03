@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Pokelite Helper",
-  "version": "2.0",
-  "description": "Importe emails + proxies (associés ligne par ligne et conservés définitivement), remplit l'inscription, renseigne prénom/nom, ouvre automatiquement les 7 liens du tirage dès que le compte est prêt, coche la case et clique sur « Je participe », et notifie Discord avec un rapport complet.",
+  "version": "2.1",
+  "description": "Traite automatiquement tous les comptes enregistrés l'un après l'autre (inscription, prénom/nom, proxy dédié, 7 participations, déconnexion, compte suivant), et notifie Discord avec un rapport complet à chaque étape.",
   "permissions": [
     "storage",
     "tabs",

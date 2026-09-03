@@ -295,3 +295,47 @@ $('resetTracking').addEventListener('click', async () => {
   await store.set({ doneByEmail, raffleOpenedByEmail });
   flashStatus(`Suivi réinitialisé pour ${myEmail || 'ce compte'}.`, 2000);
 });
+
+// --- Campagne multi-comptes ----------------------------------------------
+const campaignStatusEl = $('campaignStatus');
+
+function describeCampaign(c) {
+  if (!c) return 'Aucune campagne en cours.';
+  const total = c.accounts.length;
+
+  if (!c.running) {
+    if (c.phase === 'done') return `Campagne terminée : ${total}/${total} comptes traités.`;
+    if (c.phase === 'stopped') return `Campagne arrêtée : ${c.index}/${total} comptes traités.`;
+    return `Campagne interrompue : ${c.index}/${total} comptes traités.`;
+  }
+
+  const acc = c.accounts[c.index];
+  const label = c.phase === 'logout' ? 'déconnexion en cours...' : 'inscription / participations en cours...';
+  return `Compte ${c.index + 1}/${total} — ${acc ? acc.email : '?'} — ${label}`;
+}
+
+function refreshCampaignStatus() {
+  chrome.runtime.sendMessage({ type: 'GET_CAMPAIGN' }, (res) => {
+    campaignStatusEl.textContent = describeCampaign(res && res.campaign);
+  });
+}
+
+refreshCampaignStatus();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.campaign) refreshCampaignStatus();
+});
+
+$('startCampaign').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'START_CAMPAIGN' }, (res) => {
+    if (res && res.ok) flashStatus(`Campagne lancée pour ${res.count} compte(s).`, 2500);
+    else flashStatus((res && res.error) || 'Erreur au lancement de la campagne.', 3000);
+    refreshCampaignStatus();
+  });
+});
+
+$('stopCampaign').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'STOP_CAMPAIGN' }, () => {
+    flashStatus('Campagne arrêtée.', 1500);
+    refreshCampaignStatus();
+  });
+});

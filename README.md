@@ -22,6 +22,37 @@ clic sur « Je participe » et rapport Discord.
    l'email, puis le prénom/nom, puis **ouvre toute seule les 7 liens** du tirage.
 6. Sur chaque page produit, la case est cochée et « Je participe » cliqué
    automatiquement ; un rapport Discord est envoyé pour chacune.
+7. Pour traiter **tous les comptes automatiquement** à la suite, clique
+   **▶️ Lancer pour tous les comptes** dans le popup (voir ci-dessous).
+
+## Automatisation multi-comptes (v2.1)
+
+Le bouton **▶️ Lancer pour tous les comptes** traite la liste entière, sans
+intervention :
+
+1. Applique le proxy du 1ᵉʳ compte, ouvre `/mon-compte/`, s'inscrit avec le
+   1ᵉʳ email, renseigne prénom/nom, ouvre les 7 liens et participe à chacun.
+2. Une fois les 7 confirmées : se **déconnecte** du site (clic sur le vrai
+   lien « Déconnexion »), ferme les 7 onglets, puis **change de proxy** pour
+   celui du 2ᵉ compte et s'inscrit avec le 2ᵉ email.
+3. Répète pour chaque compte de la liste, dans l'ordre, jusqu'au dernier.
+4. Un message Discord marque le début, chaque changement de compte et la fin
+   de la campagne. Le popup affiche l'avancement en direct (`Compte 3/12 —
+   email — inscription / participations en cours...`).
+
+**⚠️ Limite importante** : l'extension n'a jamais accès au mot de passe du
+compte (WooCommerce le génère et l'envoie par email). Elle peut donc
+**créer** un compte et rester connectée dessus le temps de participer, mais
+elle ne peut pas se reconnecter plus tard à un compte déjà inscrit lors d'une
+campagne précédente. **Utilise toujours des emails neufs, jamais encore
+inscrits sur le site**, pour que l'automatisation fonctionne de bout en bout.
+
+**Sécurité anti-blocage** : si un compte reste bloqué plus de 8 minutes (case
+introuvable, page cassée, déconnexion qui échoue...), la campagne l'ignore
+automatiquement et passe au suivant plutôt que de rester figée — un message
+Discord "⏱ Compte bloqué" le signale. Le bouton **⏹ Arrêter** stoppe la
+campagne à tout moment (le compte en cours va jusqu'au bout de sa page
+actuelle, rien n'est coupé en plein clic).
 
 ## Ce qui a changé (v2.0)
 
@@ -70,3 +101,34 @@ clic sur « Je participe » et rapport Discord.
   sont enregistrés (confirmation WooCommerce attendue).
 - Suivi **par email** : chaque nouveau compte rouvre les 7 liens.
 - Ouverture séquentielle espacée (350 ms) pour ne pas saturer le proxy.
+
+## Ce qui a changé (v2.1)
+
+### Automate multi-comptes (`background.js` : section « Campagne »)
+- Petit automate à état stocké dans `chrome.storage.local.campaign` :
+  `phase` (`register` = inscription/profil/participations en cours,
+  `logout` = transition entre deux comptes), `index` (compte en cours),
+  `pendingLogoutEmail`, `tabId`, `raffleTabIds`.
+- **Détection de fin de compte** : un `chrome.storage.onChanged` écoute
+  `doneByEmail` ; dès que le compte courant atteint 7/7 participations, la
+  campagne ferme ses 7 onglets et enchaîne sur la déconnexion.
+- **Déconnexion réelle** : `content.js` cherche le vrai lien
+  `a[href*="customer-logout"]` (protégé par un nonce WordPress, donc jamais
+  deviné) et le clique — pas de navigation directe vers une URL de
+  déconnexion.
+- **Changement de compte** : le content script confirme la déconnexion par
+  un message `CAMPAIGN_STAGE`; le background bascule alors `myEmail` et le
+  proxy actif vers le compte suivant *avant* de recharger la page, pour
+  garantir qu'inscription et proxy restent alignés (pas de compte inscrit
+  avec le mauvais proxy).
+- **Inscription auto-cliquée** : le bouton "S'inscrire" est cliqué tout seul
+  uniquement quand une campagne est active (le mode manuel garde le clic
+  volontaire d'origine).
+- **Watchdog** (`chrome.alarms`, 1 min) : si un compte ne progresse plus
+  depuis 8 minutes (en inscription/participations ou en déconnexion), il est
+  forcé au suivant plutôt que de bloquer toute la file.
+- **Robustesse** : réouverture automatique de l'onglet piloté si l'utilisateur
+  le ferme par erreur (`chrome.tabs.onRemoved`) ; les onglets des 7 tirages
+  ouverts pendant la campagne sont fermés dès le compte terminé.
+- Popup : statut d'avancement en direct (`Compte i/total — email — phase`),
+  boutons **▶️ Lancer pour tous les comptes** / **⏹ Arrêter**.

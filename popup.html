@@ -72,6 +72,23 @@
   <button id="openLinks">Ouvrir les 7 liens du tirage</button>
   <button id="resetTracking">Réinitialiser le suivi de ce compte</button>
 
+  <hr />
+
+  <label>Automatisation multi-comptes</label>
+  <div class="hint">
+    Traite tous les comptes enregistrés l'un après l'autre : inscription,
+    prénom/nom, 7 participations, puis déconnexion et passage au compte
+    suivant avec son proxy associé — jusqu'au dernier de la liste.
+    Nécessite des emails jamais utilisés sur le site (l'extension ne connaît
+    aucun mot de passe, donc elle ne peut pas se reconnecter à un compte déjà
+    inscrit).
+  </div>
+  <div class="row">
+    <button id="startCampaign" style="flex:1">▶️ Lancer pour tous les comptes</button>
+    <button id="stopCampaign" style="flex:1">⏹ Arrêter</button>
+  </div>
+  <div id="campaignStatus" class="hint">Aucune campagne en cours.</div>
+
   <div id="status"></div>
 
   <script src="popup.js"></script>

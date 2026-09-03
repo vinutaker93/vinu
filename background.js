@@ -39,14 +39,29 @@ async function openRaffleLinks(email, { force = false } = {}) {
 
   // Ouverture séquentielle et espacée : certains sites/proxies rejettent
   // 7 requêtes simultanées, ce qui faisait échouer une partie des onglets.
+  const openedIds = [];
   for (let i = 0; i < RAFFLE_LINKS.length; i++) {
     const url = RAFFLE_LINKS[i];
     await new Promise((resolve) => {
-      chrome.tabs.create({ url, active: false }, () => {
+      chrome.tabs.create({ url, active: false }, (tab) => {
         void chrome.runtime.lastError;
+        if (tab) openedIds.push(tab.id);
         setTimeout(resolve, 350);
       });
     });
+  }
+
+  // Pendant une campagne multi-comptes, ces onglets seront fermés
+  // automatiquement dès que le compte atteint 7/7 participations.
+  const campaignForThisEmail = await getCampaign();
+  if (
+    campaignForThisEmail &&
+    campaignForThisEmail.running &&
+    campaignForThisEmail.accounts[campaignForThisEmail.index] &&
+    campaignForThisEmail.accounts[campaignForThisEmail.index].email === key
+  ) {
+    campaignForThisEmail.raffleTabIds = (campaignForThisEmail.raffleTabIds || []).concat(openedIds);
+    await setCampaign(campaignForThisEmail);
   }
 
   await notifyDiscord({
@@ -60,6 +75,267 @@ async function openRaffleLinks(email, { force = false } = {}) {
 
   return { ok: true, opened: true, count: RAFFLE_LINKS.length };
 }
+
+// --- Campagne multi-comptes ---------------------------------------------
+// Traite tous les comptes enregistrés l'un après l'autre, entièrement sans
+// intervention : inscription -> profil -> 7 participations -> déconnexion ->
+// compte suivant (avec le proxy associé à sa ligne), jusqu'à épuisement de
+// la liste. Piloté par un petit automate stocké dans chrome.storage.local.
+const ACCOUNT_TIMEOUT_MS = 8 * 60 * 1000; // sécurité anti-blocage par compte
+
+async function getCampaign() {
+  const { campaign } = await storage.get(['campaign']);
+  return campaign || null;
+}
+function setCampaign(c) {
+  return storage.set({ campaign: c });
+}
+
+async function startCampaign() {
+  const { accounts = [], proxyLines = [] } = await storage.get(['accounts', 'proxyLines']);
+  if (accounts.length === 0) return { ok: false, error: 'Aucun compte enregistré.' };
+
+  const existing = await getCampaign();
+  if (existing && existing.running) return { ok: false, error: 'Une campagne est déjà en cours.' };
+
+  const campaign = {
+    running: true,
+    accounts: accounts.map((a, i) => ({ email: a.email, proxy: proxyLines[i] || '' })),
+    index: 0,
+    phase: 'register', // 'register' = inscription/profil/participations en cours | 'logout' = transition
+    pendingLogoutEmail: null,
+    tabId: null,
+    raffleTabIds: [],
+    finishedIndexes: {},
+    startedAt: Date.now(),
+    startedAccountAt: Date.now(),
+  };
+
+  const first = campaign.accounts[0];
+  await storage.set({ myEmail: first.email });
+  await applyProxy(first.proxy || null);
+
+  const tab = await new Promise((resolve) =>
+    chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: true }, resolve)
+  );
+  campaign.tabId = tab && tab.id;
+  await setCampaign(campaign);
+
+  await notifyDiscord({
+    status: 'info',
+    title: '🚀 Campagne multi-comptes démarrée',
+    email: first.email,
+    item: `${campaign.accounts.length} compte(s) au total`,
+    progress: `Compte 1/${campaign.accounts.length}`,
+    description:
+      'Inscription, profil puis 7 participations pour chaque compte, avec déconnexion et changement de proxy automatiques entre chacun.',
+  });
+
+  return { ok: true, count: campaign.accounts.length };
+}
+
+async function stopCampaign() {
+  const c = await getCampaign();
+  if (!c || !c.running) return { ok: true };
+
+  const tabIds = (c.raffleTabIds || []).slice();
+  const current = c.accounts[c.index];
+  c.running = false;
+  c.phase = 'stopped';
+  await setCampaign(c);
+  tabIds.forEach((id) => chrome.tabs.remove(id, () => void chrome.runtime.lastError));
+
+  await notifyDiscord({
+    status: 'warning',
+    title: '⏹ Campagne arrêtée manuellement',
+    email: current ? current.email : '—',
+    item: `${c.index}/${c.accounts.length} compte(s) traité(s)`,
+    description: 'La campagne multi-comptes a été arrêtée avant la fin de la liste.',
+  });
+  return { ok: true };
+}
+
+// Un compte a atteint 7/7 participations : notifie, ferme ses onglets, et
+// enchaîne sur la déconnexion + le compte suivant (ou termine la campagne).
+async function accountFinished(index) {
+  const c = await getCampaign();
+  if (!c || !c.running || c.index !== index) return;
+  const acc = c.accounts[index];
+  if (!acc) return;
+
+  const tabIds = (c.raffleTabIds || []).slice();
+  c.raffleTabIds = [];
+  await setCampaign(c);
+  tabIds.forEach((id) => chrome.tabs.remove(id, () => void chrome.runtime.lastError));
+
+  const isLast = index + 1 >= c.accounts.length;
+  await notifyDiscord({
+    status: 'success',
+    title: isLast ? '✅ Dernier compte terminé' : '✅ Compte terminé — passage au suivant',
+    email: acc.email,
+    item: `${RAFFLE_LINKS.length}/${RAFFLE_LINKS.length} tirages`,
+    progress: `Compte ${index + 1}/${c.accounts.length}`,
+    description: isLast
+      ? 'La campagne va se terminer.'
+      : 'Déconnexion puis inscription automatique du compte suivant...',
+  });
+
+  if (isLast) {
+    c.running = false;
+    c.phase = 'done';
+    await setCampaign(c);
+    if (c.tabId) chrome.tabs.remove(c.tabId, () => void chrome.runtime.lastError);
+    await notifyDiscord({
+      status: 'success',
+      title: '🏁 Campagne terminée',
+      email: '—',
+      item: `${c.accounts.length} compte(s)`,
+      description: `Les ${c.accounts.length} comptes ont été traités : inscription, profil et ${RAFFLE_LINKS.length} participations chacun.`,
+    });
+    return;
+  }
+
+  c.phase = 'logout';
+  c.pendingLogoutEmail = acc.email;
+  c.logoutStartedAt = Date.now();
+  await setCampaign(c);
+
+  if (c.tabId) {
+    chrome.tabs.update(c.tabId, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
+  } else {
+    const tab = await new Promise((resolve) =>
+      chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: false }, resolve)
+    );
+    c.tabId = tab && tab.id;
+    await setCampaign(c);
+  }
+}
+
+// Le content script confirme qu'il vient de se déconnecter : on bascule sur
+// le compte suivant (email + proxy) et on relance la page pour l'inscription.
+async function handleCampaignStage(stage, email, tabId) {
+  const c = await getCampaign();
+  if (!c || !c.running) return;
+
+  if (stage === 'logged-out') {
+    if (c.phase !== 'logout' || c.pendingLogoutEmail !== email) return; // signal obsolète, ignoré
+
+    c.index += 1;
+    c.pendingLogoutEmail = null;
+    c.phase = 'register';
+    c.startedAccountAt = Date.now();
+    await setCampaign(c);
+
+    if (c.index >= c.accounts.length) {
+      c.running = false;
+      await setCampaign(c);
+      return;
+    }
+
+    const next = c.accounts[c.index];
+    await storage.set({ myEmail: next.email });
+    await applyProxy(next.proxy || null);
+
+    const tid = tabId || c.tabId;
+    if (tid) {
+      chrome.tabs.update(tid, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
+    } else {
+      const tab = await new Promise((resolve) =>
+        chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: false }, resolve)
+      );
+      const fresh = await getCampaign();
+      if (fresh && fresh.running) {
+        fresh.tabId = tab && tab.id;
+        await setCampaign(fresh);
+      }
+    }
+  }
+}
+
+// Détecte quand le compte en cours atteint 7/7 participations.
+async function onDoneByEmailChanged(doneByEmail) {
+  const c = await getCampaign();
+  if (!c || !c.running || c.phase !== 'register') return;
+  const acc = c.accounts[c.index];
+  if (!acc) return;
+  const count = Object.keys(doneByEmail[acc.email] || {}).length;
+  if (count >= RAFFLE_LINKS.length && !c.finishedIndexes[c.index]) {
+    c.finishedIndexes[c.index] = true;
+    await setCampaign(c);
+    await accountFinished(c.index);
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.doneByEmail) {
+    onDoneByEmailChanged(changes.doneByEmail.newValue || {});
+  }
+});
+
+// Filet de sécurité : si un compte reste bloqué (page cassée, case
+// introuvable, déconnexion qui échoue...) on force le passage au suivant
+// plutôt que de laisser la campagne geler indéfiniment.
+async function checkCampaignWatchdog() {
+  const c = await getCampaign();
+  if (!c || !c.running) return;
+
+  const started = c.phase === 'logout' ? c.logoutStartedAt || c.startedAccountAt : c.startedAccountAt;
+  if (!started || Date.now() - started < ACCOUNT_TIMEOUT_MS) return;
+
+  const acc = c.accounts[c.index];
+  await notifyDiscord({
+    status: 'error',
+    title: '⏱ Compte bloqué — passage forcé au suivant',
+    email: acc ? acc.email : '—',
+    item: `Phase : ${c.phase === 'logout' ? 'déconnexion' : 'inscription / participations'}`,
+    progress: `Compte ${c.index + 1}/${c.accounts.length}`,
+    description: `Aucune progression détectée depuis plus de ${Math.round(ACCOUNT_TIMEOUT_MS / 60000)} minutes. Le compte est ignoré, la campagne continue avec le suivant.`,
+  });
+
+  if (c.phase === 'logout') {
+    c.index += 1;
+    c.pendingLogoutEmail = null;
+    c.phase = 'register';
+    c.startedAccountAt = Date.now();
+    await setCampaign(c);
+    if (c.index >= c.accounts.length) {
+      c.running = false;
+      await setCampaign(c);
+      return;
+    }
+    const next = c.accounts[c.index];
+    await storage.set({ myEmail: next.email });
+    await applyProxy(next.proxy || null);
+    if (c.tabId) {
+      chrome.tabs.update(c.tabId, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
+    } else {
+      const tab = await new Promise((resolve) =>
+        chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: false }, resolve)
+      );
+      c.tabId = tab && tab.id;
+      await setCampaign(c);
+    }
+  } else {
+    c.finishedIndexes[c.index] = true;
+    await setCampaign(c);
+    await accountFinished(c.index);
+  }
+}
+
+chrome.alarms.create('campaign-watchdog', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === 'campaign-watchdog') checkCampaignWatchdog();
+});
+
+// Si l'onglet piloté par la campagne est fermé manuellement, on en rouvre un
+// à la prochaine action au lieu de rester bloqué sur un tabId mort.
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const c = await getCampaign();
+  if (c && c.running && c.tabId === tabId) {
+    c.tabId = null;
+    await setCampaign(c);
+  }
+});
 
 // --- Proxy --------------------------------------------------------------
 // Formats acceptés :
@@ -388,6 +664,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'GET_RAFFLE_LINKS') {
     sendResponse({ ok: true, links: RAFFLE_LINKS });
+    return true;
+  }
+
+  if (msg.type === 'START_CAMPAIGN') {
+    startCampaign().then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === 'STOP_CAMPAIGN') {
+    stopCampaign().then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === 'GET_CAMPAIGN') {
+    getCampaign().then((campaign) => sendResponse({ ok: true, campaign }));
+    return true;
+  }
+
+  if (msg.type === 'CAMPAIGN_STAGE') {
+    handleCampaignStage(msg.stage, msg.email, sender.tab && sender.tab.id).then(() =>
+      sendResponse({ ok: true })
+    );
     return true;
   }
 });

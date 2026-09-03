@@ -333,7 +333,37 @@
   }
 
   // --- 1. Page compte -----------------------------------------------------
+  // --- Campagne multi-comptes : déconnexion pilotée par le background -----
+  // Quand une campagne est en cours et en phase "logout", cette page doit
+  // d'abord clore la session en cours avant toute autre chose. On confirme
+  // au background dès que le site n'est plus connecté (avant OU après avoir
+  // cliqué le lien de déconnexion), qui enchaîne alors sur le compte suivant.
+  async function handleCampaignLogout(myEmail) {
+    const { campaign } = await store.get(['campaign']);
+    if (!campaign || !campaign.running || campaign.phase !== 'logout') return false;
+
+    if (isLoggedIn()) {
+      const logoutLink =
+        document.querySelector('a[href*="customer-logout"]') ||
+        findByText('a', ['déconnexion', 'deconnexion', 'logout', 'log out']);
+
+      if (logoutLink) {
+        panel('Automatisation multi-comptes', [`Déconnexion de ${myEmail}...`]);
+        send('CAMPAIGN_STAGE', { stage: 'logging-out', email: myEmail });
+        logoutLink.click();
+        return true; // la page va se recharger, rien d'autre à faire ici
+      }
+      // Pas de lien de déconnexion trouvé : on ne bloque pas la campagne,
+      // on remonte quand même le statut (le watchdog rattraperait sinon).
+    }
+
+    send('CAMPAIGN_STAGE', { stage: 'logged-out', email: myEmail });
+    return true;
+  }
+
   async function handleAccountPage(myEmail) {
+    if (await handleCampaignLogout(myEmail)) return;
+
     if (isLoggedIn()) {
       const { filledProfiles = {}, raffleOpenedByEmail = {}, profileNames = {} } = await store.get([
         'filledProfiles',
@@ -395,30 +425,37 @@
       findByText('button, input[type="submit"]', ['inscri', 'sign up', "s'inscrire"], form || document) ||
       (form && form.querySelector('button[type="submit"], input[type="submit"]'));
 
+    const { campaign } = await store.get(['campaign']);
+    const autoRun = !!(campaign && campaign.running);
+
+    function doSubmit() {
+      submitBtn.click();
+      report({
+        status: 'info',
+        title: '📝 Inscription envoyée',
+        step: 'Inscription',
+        email: myEmail,
+        item: 'Création de compte Pokelite',
+      });
+    }
+
     panel(
       'Inscription',
       [
         `Email importé : ${myEmail}`,
-        submitBtn ? "Bouton d'inscription trouvé." : "Bouton d'inscription introuvable — clique-le toi-même.",
+        submitBtn
+          ? autoRun
+            ? "Bouton d'inscription trouvé — envoi automatique (campagne)."
+            : "Bouton d'inscription trouvé."
+          : "Bouton d'inscription introuvable — clique-le toi-même.",
       ],
-      submitBtn
-        ? [
-            {
-              label: "S'inscrire",
-              onClick: () => {
-                submitBtn.click();
-                report({
-                  status: 'info',
-                  title: '📝 Inscription envoyée',
-                  step: 'Inscription',
-                  email: myEmail,
-                  item: 'Création de compte Pokelite',
-                });
-              },
-            },
-          ]
-        : []
+      autoRun || !submitBtn ? [] : [{ label: "S'inscrire", onClick: doSubmit }]
     );
+
+    if (autoRun && submitBtn) {
+      await sleep(500);
+      doSubmit();
+    }
   }
 
   // --- 1b. Prénom / nom ---------------------------------------------------
