@@ -506,6 +506,77 @@
     }
   }
 
+  // --- Debug : capture du HTML du bloc de participation -------------------
+  // Sert à m'envoyer le HTML exact quand la case ou le bouton ne sont pas
+  // détectés, pour ajouter le bon sélecteur.
+  function captureBlockHtml(checkbox, btn) {
+    const anchor = checkbox || btn;
+    let block = null;
+
+    if (anchor) {
+      // On remonte jusqu'au conteneur qui englobe la case ET le bouton.
+      let el = anchor;
+      while (el && el !== document.body) {
+        if ((!checkbox || el.contains(checkbox)) && (!btn || el.contains(btn))) {
+          if (el.matches('form, .product, .summary, section, article') || el.children.length > 1) {
+            block = el;
+            break;
+          }
+        }
+        el = el.parentElement;
+      }
+    }
+
+    block =
+      block ||
+      document.querySelector('form.cart, form, .summary.entry-summary, .product, main') ||
+      document.body;
+
+    const html = block.outerHTML;
+    return [
+      `URL: ${location.href}`,
+      `Titre: ${document.title}`,
+      `Case détectée: ${checkbox ? describe(checkbox) : 'AUCUNE'}`,
+      `Bouton détecté: ${btn ? describe(btn) : 'AUCUN'}`,
+      `Cases présentes: ${$$('input[type="checkbox"]').map(describe).join(' | ') || 'aucune'}`,
+      `Boutons présents: ${$$('button, input[type="submit"], .button')
+        .slice(0, 15)
+        .map((b) => `${describe(b)} "${textOf(b).slice(0, 40)}"`)
+        .join(' | ')}`,
+      '--- HTML DU BLOC ---',
+      html.length > 60000 ? html.slice(0, 60000) + '\n[...tronqué...]' : html,
+    ].join('\n');
+  }
+
+  function describe(el) {
+    if (!el) return '—';
+    const id = el.id ? `#${el.id}` : '';
+    const cls = el.className && typeof el.className === 'string'
+      ? '.' + el.className.trim().split(/\s+/).slice(0, 4).join('.')
+      : '';
+    const name = el.name ? `[name="${el.name}"]` : '';
+    return `${el.tagName.toLowerCase()}${id}${cls}${name}`;
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {}
+    // Repli si l'API clipboard est bloquée par la page.
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch (_) {}
+    ta.remove();
+    return ok;
+  }
+
   // --- 2. Catégorie -------------------------------------------------------
   function handleCategoryPage() {
     const hrefs = Array.from(
@@ -590,6 +661,19 @@
           {
             label: 'Refaire (cocher + participer)',
             onClick: () => autoParticipate(true),
+          },
+          {
+            label: '📋 Copier le HTML du bloc',
+            onClick: async () => {
+              const dump = captureBlockHtml(checkbox, btn);
+              console.log('[Pokelite Helper] Bloc de participation :\n' + dump);
+              const ok = await copyToClipboard(dump);
+              refreshPanel(
+                ok
+                  ? '📋 HTML copié — colle-le dans le chat.'
+                  : '📋 Copie bloquée — le HTML est dans la console (F12).'
+              );
+            },
           },
         ]
       );
