@@ -1,3 +1,5 @@
+import { isWebhookUrl, webhookOrigin, report } from './discord.js';
+
 const els = {
   productUrl: document.getElementById('productUrl'),
   loadBtn: document.getElementById('loadBtn'),
@@ -7,7 +9,12 @@ const els = {
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
   status: document.getElementById('status'),
-  log: document.getElementById('log')
+  log: document.getElementById('log'),
+  webhookUrl: document.getElementById('webhookUrl'),
+  discordEnabled: document.getElementById('discordEnabled'),
+  testWebhookBtn: document.getElementById('testWebhookBtn'),
+  discordStatus: document.getElementById('discordStatus'),
+  discordPanel: document.getElementById('discordPanel')
 };
 
 const DEFAULT_POLL_SECONDS = 5;
@@ -82,8 +89,14 @@ async function restore() {
     'variantTitle',
     'productTitle',
     'pollSeconds',
-    'variants'
+    'variants',
+    'discordWebhook',
+    'discordEnabled'
   ]);
+
+  els.webhookUrl.value = state.discordWebhook || '';
+  els.discordEnabled.checked = Boolean(state.discordEnabled);
+  els.discordPanel.open = Boolean(state.discordWebhook);
 
   if (state.siteOrigin && state.productHandle) {
     els.productUrl.value = `${state.siteOrigin}/products/${state.productHandle}`;
@@ -188,6 +201,71 @@ els.stopBtn.addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'STOP_WATCHING' });
   renderWatchingUI(false);
   setStatus('Inactif');
+});
+
+function setDiscordStatus(text, isError = false) {
+  els.discordStatus.textContent = text;
+  els.discordStatus.classList.toggle('error', isError);
+}
+
+/** Vérifie l'URL, demande la permission d'hôte, enregistre, puis envoie un test. */
+els.testWebhookBtn.addEventListener('click', async () => {
+  const webhook = els.webhookUrl.value.trim();
+
+  if (!isWebhookUrl(webhook)) {
+    setDiscordStatus('URL invalide. Attendu : https://discord.com/api/webhooks/…', true);
+    return;
+  }
+
+  const granted = await chrome.permissions.request({ origins: [webhookOrigin(webhook)] });
+  if (!granted) {
+    setDiscordStatus('Permission refusée — impossible de joindre Discord.', true);
+    return;
+  }
+
+  await chrome.storage.local.set({
+    discordWebhook: webhook,
+    discordEnabled: els.discordEnabled.checked
+  });
+
+  els.testWebhookBtn.disabled = true;
+  setDiscordStatus('Envoi du test…');
+
+  const context = await chrome.storage.local.get([
+    'siteOrigin',
+    'productHandle',
+    'productTitle',
+    'variantTitle'
+  ]);
+  const result = await report(webhook, 'test', context);
+
+  els.testWebhookBtn.disabled = false;
+  setDiscordStatus(
+    result.ok ? '✅ Rapport de test envoyé sur Discord.' : `❌ Échec : ${result.error}`,
+    !result.ok
+  );
+});
+
+els.discordEnabled.addEventListener('change', async () => {
+  const enabled = els.discordEnabled.checked;
+  await chrome.storage.local.set({ discordEnabled: enabled });
+
+  if (!enabled) {
+    setDiscordStatus('Rapports désactivés.');
+    return;
+  }
+
+  // Activer sans avoir enregistré le webhook ne produirait rien : la
+  // permission d'hôte n'est demandée qu'au moment de l'enregistrement.
+  const { discordWebhook } = await chrome.storage.local.get('discordWebhook');
+  const typed = els.webhookUrl.value.trim();
+
+  if (!discordWebhook || (typed && typed !== discordWebhook)) {
+    setDiscordStatus('Clique « Enregistrer et tester » pour valider le webhook.', true);
+    return;
+  }
+
+  setDiscordStatus('Rapports activés.');
 });
 
 chrome.storage.onChanged.addListener(async (changes, area) => {

@@ -17,6 +17,8 @@
  * serait alors créé dans une session anonyme, invisible depuis l'onglet.
  */
 
+import { report } from './discord.js';
+
 const ALARM_NAME = 'restock-poll';
 
 // chrome.alarms ne descend pas sous la minute : chaque réveil enchaîne donc une
@@ -34,7 +36,8 @@ const STATE_KEYS = [
   'variantTitle',
   'productTitle',
   'pollSeconds',
-  'tabId'
+  'tabId',
+  'notified'
 ];
 
 let burstRunning = false;
@@ -56,9 +59,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'START_WATCHING') {
     (async () => {
-      await chrome.storage.local.set({ watching: true });
+      // `notified` repart à zéro : les rapports Discord sont dédupliqués par
+      // session de surveillance, pas sur toute la vie de l'extension.
+      await chrome.storage.local.set({ watching: true, notified: {} });
       await addLog('▶️ Surveillance démarrée.');
       ensureAlarm();
+      notifyDiscord('watch_started', await getState());
       runBurst(); // volontairement non attendu : la rafale dure ~55 s
       sendResponse({ ok: true });
     })();
@@ -67,8 +73,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'STOP_WATCHING') {
     (async () => {
+      const state = await getState();
       await chrome.storage.local.set({ watching: false });
       await addLog('⏹ Surveillance arrêtée.');
+      notifyDiscord('watch_stopped', state);
       sendResponse({ ok: true });
     })();
     return true;
@@ -145,6 +153,7 @@ async function checkOnce(state) {
   if (!siteOrigin || !productHandle || !variantId) {
     await addLog('⚠️ Configuration incomplète — recharge le produit dans le popup.');
     await chrome.storage.local.set({ watching: false });
+    await notifyDiscord('watch_stopped', state, { detail: 'Configuration incomplète.' });
     return true;
   }
 
@@ -170,10 +179,24 @@ async function checkOnce(state) {
 
   await addLog('✅ En stock ! Ajout au panier…');
 
+  const notified = state.notified || {};
+  if (!notified.inStock) {
+    await chrome.storage.local.set({ notified: { ...notified, inStock: true } });
+    await notifyDiscord('in_stock', state);
+  }
+
   const added = await runInTab(tabId, pageAddToCart, [siteOrigin, variantId]);
 
   if (!added || !added.ok) {
-    await addLog(`❌ Ajout au panier refusé : ${added?.error || 'erreur inconnue'}`);
+    const reason = added?.error || 'erreur inconnue';
+    await addLog(`❌ Ajout au panier refusé : ${reason}`);
+
+    // Un même refus se répète à chaque tour : on ne rapporte que du nouveau.
+    const flags = (await getState()).notified || {};
+    if (flags.failReason !== reason) {
+      await chrome.storage.local.set({ notified: { ...flags, failReason: reason } });
+      await notifyDiscord('add_failed', state, { detail: reason });
+    }
     return false; // souvent une rupture entre-temps : on continue de surveiller
   }
 
@@ -182,8 +205,28 @@ async function checkOnce(state) {
 
   await openCheckout(tabId, siteOrigin);
   notify(productTitle);
+  await notifyDiscord('added_to_cart', state, { checkoutUrl: `${siteOrigin}/checkout` });
 
   return true;
+}
+
+/** Envoie un rapport VINULOG si un webhook est configuré et actif. */
+async function notifyDiscord(event, state = {}, extra = {}) {
+  const { discordWebhook, discordEnabled } = await chrome.storage.local.get([
+    'discordWebhook',
+    'discordEnabled'
+  ]);
+  if (!discordEnabled || !discordWebhook) return;
+
+  const result = await report(discordWebhook, event, {
+    siteOrigin: state.siteOrigin,
+    productHandle: state.productHandle,
+    productTitle: state.productTitle,
+    variantTitle: state.variantTitle,
+    ...extra
+  });
+
+  if (!result.ok) await addLog(`⚠️ Discord : ${result.error}`);
 }
 
 /**

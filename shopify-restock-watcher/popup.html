@@ -32,12 +32,42 @@
 
     <div id="log" class="log"></div>
 
+    <details id="discordPanel">
+      <summary>
+        <img src="assets/vinulog-lynx.png" alt="" class="brand-mark" />
+        Rapports Discord — VINULOG
+      </summary>
+
+      <label for="webhookUrl">URL du webhook</label>
+      <input
+        id="webhookUrl"
+        type="url"
+        placeholder="https://discord.com/api/webhooks/…"
+        spellcheck="false"
+      />
+
+      <label class="checkbox">
+        <input id="discordEnabled" type="checkbox" />
+        Activer les rapports
+      </label>
+
+      <button id="testWebhookBtn" class="secondary">Enregistrer et tester</button>
+
+      <p id="discordStatus" class="status"></p>
+
+      <p class="note">
+        Chaque rapport contient le site, l'article, le lien, la date, l'heure et
+        l'action effectuée, illustré par le lynx VINULOG. Les vérifications
+        « toujours en rupture » n'envoient rien.
+      </p>
+    </details>
+
     <p class="note">
       L'extension s'arrête à la page de paiement. Pour remplir ta carte en un
       clic, utilise l'autofill natif de Chrome :
       <em>Paramètres → Saisie automatique → Moyens de paiement</em>.
     </p>
 
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
   </body>
 </html>

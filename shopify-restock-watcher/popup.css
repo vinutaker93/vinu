@@ -134,3 +134,43 @@ button:disabled {
   line-height: 1.5;
   color: var(--muted);
 }
+
+details {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.brand-mark {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.checkbox input {
+  width: auto;
+  margin: 0;
+}
+
+#discordStatus:empty {
+  display: none;
+}

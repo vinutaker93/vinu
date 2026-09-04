@@ -31,6 +31,40 @@ dans le navigateur.
    `/checkout` dans l'onglet, notification Chrome. La surveillance s'arrête
    d'elle-même — il ne reste qu'à payer.
 
+## Rapports Discord — VINULOG
+
+Dans le popup, dépliez **Rapports Discord — VINULOG** :
+
+1. Coller l'URL du webhook (`https://discord.com/api/webhooks/…`).
+2. Cocher **Activer les rapports**.
+3. **Enregistrer et tester** — Chrome demande l'autorisation pour `discord.com`,
+   puis un message de test part immédiatement.
+
+Chaque rapport est un embed signé VINULOG, illustré par la caricature de lynx
+(`assets/vinulog-lynx.png`), avec :
+
+| Champ | Contenu |
+| --- | --- |
+| Site | Domaine de la boutique |
+| Article | Produit — variante surveillée |
+| Action | Surveillance démarrée / Produit disponible / Ajouté au panier / Ajout refusé / Surveillance arrêtée |
+| Date | JJ/MM/AAAA |
+| Heure | HH:MM:SS |
+| Lien | URL de la page produit |
+| Paiement | URL du checkout (sur l'ajout au panier) |
+| Détail | Raison d'un refus, le cas échéant |
+
+Envoi maîtrisé : les vérifications « toujours en rupture » ne produisent aucun
+message, une disponibilité n'est signalée qu'une fois par session, et un même
+motif de refus n'est pas répété. En cas d'erreur réseau, de 429 ou de 5xx,
+l'envoi est réessayé (3 tentatives, `retry_after` respecté) ; un webhook
+supprimé ou invalide (401/403/404) n'est pas réessayé et l'erreur apparaît dans
+le journal du popup.
+
+L'image est jointe en multipart et référencée via `attachment://` : aucun
+hébergement externe à maintenir. Pour la modifier, éditer et relancer
+`python3 tools/make-lynx.py` (aucune dépendance).
+
 ## Fonctionnement
 
 - **Détection du stock** : appel de l'API publique de la boutique
@@ -57,7 +91,7 @@ dans le navigateur.
 | `notifications` | Prévenir quand l'article est au panier |
 | `tabs` | Retrouver / ouvrir l'onglet boutique et l'amener au checkout |
 | `scripting` | Exécuter les deux requêtes dans le contexte du site |
-| hôtes | **Aucun accès accordé d'avance** : `optional_host_permissions` demande le domaine au moment où tu charges un produit |
+| hôtes | **Aucun accès accordé d'avance** : `optional_host_permissions` demande la boutique au chargement du produit, et `discord.com` à l'enregistrement du webhook |
 
 ## Limites connues
 
