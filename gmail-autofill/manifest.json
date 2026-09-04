@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Gmail Autofill (a la demande)",
+  "version": "1.0",
+  "description": "Remplit e-mail + mot de passe d'UN compte choisi sur la page de connexion Gmail. A la demande, un compte a la fois. Sans proxy, sans enchainement automatique.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["https://accounts.google.com/*"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://accounts.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
