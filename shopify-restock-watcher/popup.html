@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Shopify Restock Watcher</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <h1>Shopify Restock Watcher</h1>
+
+    <label for="productUrl">URL de la page produit</label>
+    <input
+      id="productUrl"
+      type="url"
+      placeholder="https://boutique.com/products/mon-produit"
+      spellcheck="false"
+    />
+    <button id="loadBtn" class="secondary">Charger le produit</button>
+
+    <div id="variantRow" hidden>
+      <label for="variantSelect">Variante à surveiller</label>
+      <select id="variantSelect"></select>
+    </div>
+
+    <label for="pollSeconds">Intervalle de vérification (secondes)</label>
+    <input id="pollSeconds" type="number" min="2" max="60" step="1" value="5" />
+
+    <button id="startBtn" class="primary">Démarrer la surveillance</button>
+    <button id="stopBtn" class="danger" hidden>Arrêter la surveillance</button>
+
+    <p id="status" class="status">Inactif</p>
+
+    <div id="log" class="log"></div>
+
+    <p class="note">
+      L'extension s'arrête à la page de paiement. Pour remplir ta carte en un
+      clic, utilise l'autofill natif de Chrome :
+      <em>Paramètres → Saisie automatique → Moyens de paiement</em>.
+    </p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

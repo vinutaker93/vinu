@@ -1,0 +1,136 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1c1c1e;
+  --muted: #6b6b70;
+  --border: #d8d8dc;
+  --surface: #f6f6f7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --fg: #f2f2f5;
+    --muted: #a0a0a6;
+    --border: #3a3a3e;
+    --surface: #2a2a2d;
+  }
+}
+
+body {
+  width: 340px;
+  margin: 0;
+  padding: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+input,
+select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+button.primary {
+  background: #1f7a34;
+  color: #fff;
+}
+
+button.secondary {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+
+button.danger {
+  background: #b3261e;
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.status {
+  margin: 12px 0 0;
+  padding: 8px 9px;
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  word-wrap: break-word;
+}
+
+.status.error {
+  background: #fdecea;
+  color: #7d1f18;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status.error {
+    background: #4a1c18;
+    color: #ffb4a9;
+  }
+}
+
+.log {
+  margin-top: 8px;
+  max-height: 132px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.log:empty {
+  display: none;
+}
+
+.log-entry {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.log-entry:last-child {
+  border-bottom: 0;
+}
+
+.note {
+  margin: 12px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
