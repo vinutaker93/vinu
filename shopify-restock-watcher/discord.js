@@ -141,18 +141,23 @@ async function buildBody(payload) {
   return { body: form, headers: undefined };
 }
 
-async function retryAfterMs(res) {
+/**
+ * @param {number} cap plafond d'attente. Borné pour un renvoi de message, mais
+ *   laissé libre pour la modification du webhook, dont la limite Discord se
+ *   compte en minutes : la tronquer donnerait un délai faux à l'utilisateur.
+ */
+async function retryAfterMs(res, cap = MAX_RETRY_WAIT_MS) {
   // Discord renvoie retry_after (secondes) dans le corps, et l'en-tête en repli.
   try {
     const body = await res.clone().json();
     if (typeof body.retry_after === 'number') {
-      return Math.min(body.retry_after * 1000, MAX_RETRY_WAIT_MS);
+      return Math.min(body.retry_after * 1000, cap);
     }
   } catch {
     // corps non-JSON : on retombe sur l'en-tête
   }
   const header = Number(res.headers.get('retry-after'));
-  return Number.isFinite(header) ? Math.min(header * 1000, MAX_RETRY_WAIT_MS) : 1_000;
+  return Number.isFinite(header) ? Math.min(header * 1000, cap) : 1_000;
 }
 
 /**
@@ -196,4 +201,59 @@ export async function sendWebhook(webhookUrl, payload) {
 /** Construit puis envoie un rapport. */
 export async function report(webhookUrl, event, context) {
   return sendWebhook(webhookUrl, buildPayload(event, context));
+}
+
+/**
+ * Encode un blob en data URI.
+ * Pas de FileReader : indisponible dans un service worker. Le découpage évite
+ * de dépasser la taille d'argument de String.fromCharCode sur un gros fichier.
+ */
+async function blobToDataUri(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return `data:${blob.type || 'image/png'};base64,${btoa(binary)}`;
+}
+
+/**
+ * Applique l'identité VINULOG au webhook lui-même (nom + avatar), via
+ * PATCH /webhooks/{id}/{token} — le token de l'URL suffit, aucun bot requis.
+ *
+ * L'avatar est une propriété du webhook, pas du message : contrairement à
+ * l'image de l'embed, il ne peut pas être joint en multipart et doit être
+ * envoyé en data URI. Une fois posé, il s'applique à tous les rapports.
+ */
+export async function applyBranding(webhookUrl) {
+  const blob = await lynxBlob();
+  if (!blob) return { ok: false, error: 'image du lynx introuvable' };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: BRAND, avatar: await blobToDataUri(blob) })
+    });
+
+    if (res.ok) return { ok: true };
+
+    if (res.status === 429) {
+      const wait = Math.ceil((await retryAfterMs(res, Infinity)) / 1000);
+      return { ok: false, error: `Discord limite les modifications — réessaie dans ${wait} s` };
+    }
+
+    if (res.status === 401 || res.status === 403 || res.status === 404) {
+      return { ok: false, error: `webhook invalide (HTTP ${res.status})` };
+    }
+
+    if (res.status === 400) {
+      return { ok: false, error: 'image refusée par Discord' };
+    }
+
+    return { ok: false, error: `HTTP ${res.status}` };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }

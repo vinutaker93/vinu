@@ -1,4 +1,4 @@
-import { isWebhookUrl, webhookOrigin, report } from './discord.js';
+import { isWebhookUrl, webhookOrigin, report, applyBranding } from './discord.js';
 
 const els = {
   productUrl: document.getElementById('productUrl'),
@@ -13,6 +13,7 @@ const els = {
   webhookUrl: document.getElementById('webhookUrl'),
   discordEnabled: document.getElementById('discordEnabled'),
   testWebhookBtn: document.getElementById('testWebhookBtn'),
+  brandWebhookBtn: document.getElementById('brandWebhookBtn'),
   discordStatus: document.getElementById('discordStatus'),
   discordPanel: document.getElementById('discordPanel')
 };
@@ -208,25 +209,35 @@ function setDiscordStatus(text, isError = false) {
   els.discordStatus.classList.toggle('error', isError);
 }
 
-/** Vérifie l'URL, demande la permission d'hôte, enregistre, puis envoie un test. */
-els.testWebhookBtn.addEventListener('click', async () => {
+/**
+ * Valide l'URL saisie, obtient la permission d'hôte et enregistre le webhook.
+ * Appelée en tête de gestionnaire de clic : chrome.permissions.request exige un
+ * geste utilisateur, donc rien ne doit être attendu avant elle.
+ */
+async function ensureWebhook() {
   const webhook = els.webhookUrl.value.trim();
 
   if (!isWebhookUrl(webhook)) {
     setDiscordStatus('URL invalide. Attendu : https://discord.com/api/webhooks/…', true);
-    return;
+    return null;
   }
 
   const granted = await chrome.permissions.request({ origins: [webhookOrigin(webhook)] });
   if (!granted) {
     setDiscordStatus('Permission refusée — impossible de joindre Discord.', true);
-    return;
+    return null;
   }
 
   await chrome.storage.local.set({
     discordWebhook: webhook,
     discordEnabled: els.discordEnabled.checked
   });
+  return webhook;
+}
+
+els.testWebhookBtn.addEventListener('click', async () => {
+  const webhook = await ensureWebhook();
+  if (!webhook) return;
 
   els.testWebhookBtn.disabled = true;
   setDiscordStatus('Envoi du test…');
@@ -242,6 +253,25 @@ els.testWebhookBtn.addEventListener('click', async () => {
   els.testWebhookBtn.disabled = false;
   setDiscordStatus(
     result.ok ? '✅ Rapport de test envoyé sur Discord.' : `❌ Échec : ${result.error}`,
+    !result.ok
+  );
+});
+
+/** Renomme le webhook en VINULOG et lui pose le lynx en avatar. */
+els.brandWebhookBtn.addEventListener('click', async () => {
+  const webhook = await ensureWebhook();
+  if (!webhook) return;
+
+  els.brandWebhookBtn.disabled = true;
+  setDiscordStatus('Application de l’identité VINULOG…');
+
+  const result = await applyBranding(webhook);
+
+  els.brandWebhookBtn.disabled = false;
+  setDiscordStatus(
+    result.ok
+      ? '✅ Webhook renommé VINULOG, lynx posé en avatar.'
+      : `❌ Échec : ${result.error}`,
     !result.ok
   );
 });

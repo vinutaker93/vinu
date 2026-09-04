@@ -39,6 +39,12 @@ Dans le popup, dépliez **Rapports Discord — VINULOG** :
 2. Cocher **Activer les rapports**.
 3. **Enregistrer et tester** — Chrome demande l'autorisation pour `discord.com`,
    puis un message de test part immédiatement.
+4. **Appliquer le lynx en avatar du webhook** (optionnel) — renomme le webhook
+   en `VINULOG` et lui pose le lynx en photo de profil, via
+   `PATCH /webhooks/{id}/{token}`. Le token contenu dans l'URL suffit, aucun bot
+   n'est nécessaire. C'est une modification permanente du webhook côté Discord,
+   d'où le bouton distinct. Discord limite fortement ces modifications : sur un
+   429, le délai réel d'attente est affiché.
 
 Chaque rapport est un embed signé VINULOG, illustré par la caricature de lynx
 (`assets/vinulog-lynx.png`), avec :
@@ -61,8 +67,10 @@ l'envoi est réessayé (3 tentatives, `retry_after` respecté) ; un webhook
 supprimé ou invalide (401/403/404) n'est pas réessayé et l'erreur apparaît dans
 le journal du popup.
 
-L'image est jointe en multipart et référencée via `attachment://` : aucun
-hébergement externe à maintenir. Pour la modifier, éditer et relancer
+L'image de l'embed est jointe en multipart et référencée via `attachment://` :
+aucun hébergement externe à maintenir. L'avatar, lui, est une propriété du
+webhook et non du message : il ne peut pas être joint en multipart et part en
+data URI lors de l'étape 4. Pour changer le dessin, éditer puis relancer
 `python3 tools/make-lynx.py` (aucune dépendance).
 
 ## Fonctionnement
