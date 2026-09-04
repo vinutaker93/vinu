@@ -76,13 +76,126 @@ async function openRaffleLinks(email, { force = false } = {}) {
   return { ok: true, opened: true, count: RAFFLE_LINKS.length };
 }
 
+// --- Sessions (cookies) --------------------------------------------------
+// L'extension ne connaît jamais le mot de passe d'un compte (WooCommerce le
+// génère et l'envoie par email). Pour pouvoir revenir sur un compte plus tard
+// SANS mot de passe, on sauvegarde ses cookies de connexion puis on les efface
+// du navigateur — au lieu de cliquer « Se déconnecter », qui invaliderait le
+// jeton de session côté serveur et rendrait la session non restaurable.
+const SITE_DOMAIN = 'pokelite.fr';
+
+function getAllSiteCookies() {
+  return new Promise((resolve) =>
+    chrome.cookies.getAll({ domain: SITE_DOMAIN }, (cookies) => {
+      void chrome.runtime.lastError;
+      resolve(cookies || []);
+    })
+  );
+}
+
+function cookieUrl(c) {
+  return `http${c.secure ? 's' : ''}://${c.domain.replace(/^\./, '')}${c.path}`;
+}
+
+function removeCookie(c) {
+  return new Promise((resolve) =>
+    chrome.cookies.remove({ url: cookieUrl(c), name: c.name, storeId: c.storeId }, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    })
+  );
+}
+
+function setCookie(c) {
+  const details = {
+    url: cookieUrl(c),
+    name: c.name,
+    value: c.value,
+    path: c.path,
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    storeId: c.storeId,
+  };
+  // Un cookie « hostOnly » ne doit pas recevoir de domain, sinon Chrome le
+  // recrée en cookie de domaine (donc pas au même périmètre qu'à l'origine).
+  if (!c.hostOnly) details.domain = c.domain;
+  if (!c.session && c.expirationDate) details.expirationDate = c.expirationDate;
+  // sameSite=no_restriction n'est accepté que sur un cookie secure.
+  if (c.sameSite && !(c.sameSite === 'no_restriction' && !c.secure)) details.sameSite = c.sameSite;
+
+  return new Promise((resolve) =>
+    chrome.cookies.set(details, (res) => {
+      void chrome.runtime.lastError;
+      resolve(!!res);
+    })
+  );
+}
+
+async function clearSiteCookies() {
+  const cookies = await getAllSiteCookies();
+  for (const c of cookies) await removeCookie(c);
+  return cookies.length;
+}
+
+// Sauvegarde la session du navigateur sous l'email donné.
+async function saveSession(email) {
+  if (!email) return { ok: false, error: 'Aucun compte actif.' };
+  const cookies = await getAllSiteCookies();
+  if (cookies.length === 0) return { ok: false, error: 'Aucun cookie à sauvegarder.' };
+
+  // Les cookies d'authentification WordPress sont ceux qui comptent : sans
+  // eux, la session restaurée sera déconnectée.
+  const loggedIn = cookies.some((c) => c.name.indexOf('wordpress_logged_in_') === 0);
+  const expiries = cookies.filter((c) => !c.session && c.expirationDate).map((c) => c.expirationDate);
+  const expiresAt = expiries.length ? Math.max.apply(null, expiries) * 1000 : null;
+
+  const { sessionsByEmail = {} } = await storage.get(['sessionsByEmail']);
+  sessionsByEmail[email] = { cookies, savedAt: Date.now(), expiresAt, loggedIn };
+  await storage.set({ sessionsByEmail });
+
+  return { ok: true, count: cookies.length, loggedIn, expiresAt };
+}
+
+// Recharge une session sauvegardée : cookies + proxy du compte, puis ouvre
+// la page « Mes tirages » pour vérifier les résultats.
+async function restoreSession(email) {
+  const campaign = await getCampaign();
+  if (campaign && campaign.running) {
+    return { ok: false, error: 'Arrête la campagne avant de restaurer une session.' };
+  }
+
+  const { sessionsByEmail = {}, accounts = [], proxyLines = [] } = await storage.get([
+    'sessionsByEmail',
+    'accounts',
+    'proxyLines',
+  ]);
+  const saved = sessionsByEmail[email];
+  if (!saved) return { ok: false, error: 'Aucune session sauvegardée pour ce compte.' };
+
+  await clearSiteCookies();
+  let restored = 0;
+  for (const cookie of saved.cookies) {
+    if (await setCookie(cookie)) restored++;
+  }
+
+  // Le site peut lier la session à l'IP : on remet le proxy d'origine.
+  const idx = accounts.findIndex((a) => a.email === email);
+  const proxy = idx === -1 ? '' : proxyLines[idx] || '';
+  await storage.set({ myEmail: email });
+  await applyProxy(proxy || null);
+
+  chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/mes-tirages/', active: true });
+
+  const expired = saved.expiresAt && saved.expiresAt < Date.now();
+  return { ok: true, restored, total: saved.cookies.length, expired: !!expired };
+}
+
 // --- Campagne multi-comptes ---------------------------------------------
 // Traite tous les comptes enregistrés l'un après l'autre, entièrement sans
 // intervention : inscription -> profil -> 7 participations -> déconnexion ->
 // compte suivant (avec le proxy associé à sa ligne), jusqu'à épuisement de
 // la liste. Piloté par un petit automate stocké dans chrome.storage.local.
 const ACCOUNT_TIMEOUT_MS = 8 * 60 * 1000; // sécurité anti-blocage : inscription/participations
-const LOGOUT_TIMEOUT_MS = 90 * 1000; // sécurité anti-blocage : déconnexion (doit être quasi instantanée)
 
 async function getCampaign() {
   const { campaign } = await storage.get(['campaign']);
@@ -103,14 +216,19 @@ async function startCampaign() {
     running: true,
     accounts: accounts.map((a, i) => ({ email: a.email, proxy: proxyLines[i] || '' })),
     index: 0,
-    phase: 'register', // 'register' = inscription/profil/participations en cours | 'logout' = transition
-    pendingLogoutEmail: null,
+    phase: 'register',
     tabId: null,
     raffleTabIds: [],
     finishedIndexes: {},
     startedAt: Date.now(),
     startedAccountAt: Date.now(),
   };
+
+  // Une session est peut-être déjà ouverte sur le site : on la sauvegarde
+  // sous le compte actif avant de repartir de zéro, pour ne rien perdre.
+  const { myEmail: previousEmail } = await storage.get(['myEmail']);
+  if (previousEmail) await saveSession(previousEmail);
+  await clearSiteCookies();
 
   const first = campaign.accounts[0];
   await storage.set({ myEmail: first.email });
@@ -146,18 +264,29 @@ async function stopCampaign() {
   await setCampaign(c);
   tabIds.forEach((id) => chrome.tabs.remove(id, () => void chrome.runtime.lastError));
 
+  // La session en cours reste ouverte dans le navigateur, mais on la
+  // sauvegarde quand même : elle sera restaurable même après un autre compte.
+  const saved = current ? await saveSession(current.email) : { ok: false };
+
   await notifyDiscord({
     status: 'warning',
     title: '⏹ Campagne arrêtée manuellement',
     email: current ? current.email : '—',
     item: `${c.index}/${c.accounts.length} compte(s) traité(s)`,
+    detail: saved.ok && saved.loggedIn ? 'Session du compte en cours sauvegardée.' : undefined,
     description: 'La campagne multi-comptes a été arrêtée avant la fin de la liste.',
   });
   return { ok: true };
 }
 
-// Un compte a atteint 7/7 participations : notifie, ferme ses onglets, et
-// enchaîne sur la déconnexion + le compte suivant (ou termine la campagne).
+// Un compte est terminé : ferme ses onglets, sauvegarde sa session, vide les
+// cookies du site, puis enchaîne directement sur le compte suivant.
+//
+// La bascule ne passe PLUS par le lien « Se déconnecter » : ce clic
+// invaliderait le jeton de session côté serveur (WordPress purge le token dans
+// user_meta), rendant la session impossible à restaurer plus tard. Effacer les
+// cookies côté navigateur produit le même effet pour la campagne (session
+// vierge pour l'inscription suivante) tout en restant réversible.
 async function accountFinished(index) {
   const c = await getCampaign();
   if (!c || !c.running || c.index !== index) return;
@@ -169,16 +298,21 @@ async function accountFinished(index) {
   await setCampaign(c);
   tabIds.forEach((id) => chrome.tabs.remove(id, () => void chrome.runtime.lastError));
 
+  const saved = await saveSession(acc.email);
+  await clearSiteCookies();
+
   const isLast = index + 1 >= c.accounts.length;
   await notifyDiscord({
-    status: 'success',
+    status: saved.ok && saved.loggedIn ? 'success' : 'warning',
     title: isLast ? '✅ Dernier compte terminé' : '✅ Compte terminé — passage au suivant',
     email: acc.email,
     item: `${RAFFLE_LINKS.length}/${RAFFLE_LINKS.length} tirages`,
     progress: `Compte ${index + 1}/${c.accounts.length}`,
-    description: isLast
-      ? 'La campagne va se terminer.'
-      : 'Déconnexion puis inscription automatique du compte suivant...',
+    detail:
+      saved.ok && saved.loggedIn
+        ? 'Session sauvegardée : ce compte est restaurable depuis le popup, sans mot de passe.'
+        : 'Session NON sauvegardée (aucun cookie de connexion trouvé) : ce compte ne sera pas restaurable.',
+    description: isLast ? 'La campagne va se terminer.' : 'Inscription automatique du compte suivant...',
   });
 
   if (isLast) {
@@ -196,10 +330,14 @@ async function accountFinished(index) {
     return;
   }
 
-  c.phase = 'logout';
-  c.pendingLogoutEmail = acc.email;
-  c.logoutStartedAt = Date.now();
+  c.index += 1;
+  c.phase = 'register';
+  c.startedAccountAt = Date.now();
   await setCampaign(c);
+
+  const next = c.accounts[c.index];
+  await storage.set({ myEmail: next.email });
+  await applyProxy(next.proxy || null);
 
   if (c.tabId) {
     chrome.tabs.update(c.tabId, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
@@ -209,47 +347,6 @@ async function accountFinished(index) {
     );
     c.tabId = tab && tab.id;
     await setCampaign(c);
-  }
-}
-
-// Le content script confirme qu'il vient de se déconnecter : on bascule sur
-// le compte suivant (email + proxy) et on relance la page pour l'inscription.
-async function handleCampaignStage(stage, email, tabId) {
-  const c = await getCampaign();
-  if (!c || !c.running) return;
-
-  if (stage === 'logged-out') {
-    if (c.phase !== 'logout' || c.pendingLogoutEmail !== email) return; // signal obsolète, ignoré
-
-    c.index += 1;
-    c.pendingLogoutEmail = null;
-    c.phase = 'register';
-    c.startedAccountAt = Date.now();
-    await setCampaign(c);
-
-    if (c.index >= c.accounts.length) {
-      c.running = false;
-      await setCampaign(c);
-      return;
-    }
-
-    const next = c.accounts[c.index];
-    await storage.set({ myEmail: next.email });
-    await applyProxy(next.proxy || null);
-
-    const tid = tabId || c.tabId;
-    if (tid) {
-      chrome.tabs.update(tid, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
-    } else {
-      const tab = await new Promise((resolve) =>
-        chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: false }, resolve)
-      );
-      const fresh = await getCampaign();
-      if (fresh && fresh.running) {
-        fresh.tabId = tab && tab.id;
-        await setCampaign(fresh);
-      }
-    }
   }
 }
 
@@ -280,49 +377,22 @@ async function checkCampaignWatchdog() {
   const c = await getCampaign();
   if (!c || !c.running) return;
 
-  const isLogoutPhase = c.phase === 'logout';
-  const timeout = isLogoutPhase ? LOGOUT_TIMEOUT_MS : ACCOUNT_TIMEOUT_MS;
-  const started = isLogoutPhase ? c.logoutStartedAt || c.startedAccountAt : c.startedAccountAt;
-  if (!started || Date.now() - started < timeout) return;
+  const started = c.startedAccountAt;
+  if (!started || Date.now() - started < ACCOUNT_TIMEOUT_MS) return;
 
   const acc = c.accounts[c.index];
   await notifyDiscord({
     status: 'error',
     title: '⏱ Compte bloqué — passage forcé au suivant',
     email: acc ? acc.email : '—',
-    item: `Phase : ${isLogoutPhase ? 'déconnexion' : 'inscription / participations'}`,
+    item: 'Inscription / participations',
     progress: `Compte ${c.index + 1}/${c.accounts.length}`,
-    description: `Aucune progression détectée depuis plus de ${Math.round(timeout / 1000)}s. Le compte est ignoré, la campagne continue avec le suivant.`,
+    description: `Aucune progression détectée depuis plus de ${Math.round(ACCOUNT_TIMEOUT_MS / 60000)} minutes. Le compte est ignoré, la campagne continue avec le suivant.`,
   });
 
-  if (c.phase === 'logout') {
-    c.index += 1;
-    c.pendingLogoutEmail = null;
-    c.phase = 'register';
-    c.startedAccountAt = Date.now();
-    await setCampaign(c);
-    if (c.index >= c.accounts.length) {
-      c.running = false;
-      await setCampaign(c);
-      return;
-    }
-    const next = c.accounts[c.index];
-    await storage.set({ myEmail: next.email });
-    await applyProxy(next.proxy || null);
-    if (c.tabId) {
-      chrome.tabs.update(c.tabId, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
-    } else {
-      const tab = await new Promise((resolve) =>
-        chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: false }, resolve)
-      );
-      c.tabId = tab && tab.id;
-      await setCampaign(c);
-    }
-  } else {
-    c.finishedIndexes[c.index] = true;
-    await setCampaign(c);
-    await accountFinished(c.index);
-  }
+  c.finishedIndexes[c.index] = true;
+  await setCampaign(c);
+  await accountFinished(c.index);
 }
 
 chrome.alarms.create('campaign-watchdog', { periodInMinutes: 1 });
@@ -685,10 +755,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  if (msg.type === 'CAMPAIGN_STAGE') {
-    handleCampaignStage(msg.stage, msg.email, sender.tab && sender.tab.id).then(() =>
-      sendResponse({ ok: true })
-    );
+  if (msg.type === 'SAVE_SESSION') {
+    saveSession(msg.email).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === 'RESTORE_SESSION') {
+    restoreSession(msg.email).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === 'GET_SESSIONS') {
+    storage.get(['sessionsByEmail']).then(({ sessionsByEmail = {} }) => {
+      // On ne renvoie pas les cookies eux-mêmes au popup, juste les métadonnées.
+      const summary = {};
+      for (const email of Object.keys(sessionsByEmail)) {
+        const s = sessionsByEmail[email];
+        summary[email] = { savedAt: s.savedAt, expiresAt: s.expiresAt, loggedIn: s.loggedIn };
+      }
+      sendResponse({ ok: true, sessions: summary });
+    });
     return true;
   }
 });

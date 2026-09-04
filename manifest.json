@@ -1,17 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Pokelite Helper",
-  "version": "2.2",
-  "description": "Traite automatiquement tous les comptes enregistrés l'un après l'autre (inscription, prénom/nom, proxy dédié, 7 participations, déconnexion, compte suivant), et notifie Discord avec un rapport complet à chaque étape.",
+  "version": "3.0",
+  "description": "Traite automatiquement tous les comptes enregistrés l'un après l'autre (inscription, prénom/nom, proxy dédié, 7 participations), sauvegarde la session de chaque compte pour y revenir sans mot de passe, et notifie Discord avec un rapport complet.",
   "permissions": [
     "storage",
     "tabs",
+    "cookies",
     "proxy",
     "webRequest",
     "webRequestAuthProvider",
     "alarms"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -20,8 +23,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.pokelite.fr/*", "https://pokelite.fr/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.pokelite.fr/*",
+        "https://pokelite.fr/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }

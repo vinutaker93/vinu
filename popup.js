@@ -7,6 +7,7 @@ const DEFAULT_LOGO =
 const emailEl = $('email');
 const emailSelectEl = $('emailSelect');
 const activeProxyInfoEl = $('activeProxyInfo');
+const sessionInfoEl = $('sessionInfo');
 const webhookEl = $('webhook');
 const logoEl = $('logo');
 const emailFileEl = $('emailFile');
@@ -89,6 +90,41 @@ function render({ myEmail, accounts, proxyLines }) {
   activeProxyInfoEl.textContent = `Proxy : ${p || '—'}`;
   proxyCountEl.textContent = `${proxyLines.length} proxy(s) enregistré(s) · ${accounts.length} compte(s).`;
   proxyTextEl.value = proxyLines.join('\n');
+  refreshSessionInfo(myEmail);
+}
+
+// --- Sessions -----------------------------------------------------------
+function humanDelay(ms) {
+  const h = Math.round(ms / 3600000);
+  if (h < 1) return `${Math.max(1, Math.round(ms / 60000))} min`;
+  if (h < 48) return `${h} h`;
+  return `${Math.round(h / 24)} j`;
+}
+
+function refreshSessionInfo(email) {
+  if (!email) {
+    sessionInfoEl.textContent = 'Session : —';
+    return;
+  }
+  chrome.runtime.sendMessage({ type: 'GET_SESSIONS' }, (res) => {
+    const s = res && res.sessions && res.sessions[email];
+    if (!s) {
+      sessionInfoEl.textContent = 'Session : aucune sauvegarde';
+      return;
+    }
+    if (!s.loggedIn) {
+      sessionInfoEl.textContent = 'Session : sauvegardée mais NON connectée';
+      return;
+    }
+    const left = s.expiresAt ? s.expiresAt - Date.now() : null;
+    if (left === null) {
+      sessionInfoEl.textContent = 'Session : sauvegardée (durée inconnue)';
+    } else if (left <= 0) {
+      sessionInfoEl.textContent = 'Session : ⚠️ expirée';
+    } else {
+      sessionInfoEl.textContent = `Session : ✅ valide encore ~${humanDelay(left)}`;
+    }
+  });
 }
 
 async function refresh() {
@@ -142,6 +178,36 @@ emailSelectEl.addEventListener('change', async () => {
   } else {
     flashStatus(`Compte actif : ${email}`);
   }
+});
+
+$('restoreSession').addEventListener('click', () => {
+  const email = emailSelectEl.value || emailEl.value.trim();
+  if (!email) return flashStatus('Sélectionne d’abord un compte.');
+  chrome.runtime.sendMessage({ type: 'RESTORE_SESSION', email }, (res) => {
+    if (!res || !res.ok) return flashStatus((res && res.error) || 'Restauration impossible.', 3000);
+    flashStatus(
+      res.expired
+        ? `Session restaurée (${res.restored}/${res.total}) mais expirée — tu seras sûrement déconnecté.`
+        : `Session restaurée : ${res.restored}/${res.total} cookies.`,
+      3500
+    );
+    refresh();
+  });
+});
+
+$('saveSession').addEventListener('click', () => {
+  const email = emailSelectEl.value || emailEl.value.trim();
+  if (!email) return flashStatus('Sélectionne d’abord un compte.');
+  chrome.runtime.sendMessage({ type: 'SAVE_SESSION', email }, (res) => {
+    if (!res || !res.ok) return flashStatus((res && res.error) || 'Sauvegarde impossible.', 3000);
+    flashStatus(
+      res.loggedIn
+        ? `Session sauvegardée (${res.count} cookies) pour ${email}.`
+        : `⚠️ ${res.count} cookies sauvegardés, mais aucun cookie de connexion : tu n'es pas connecté sur ce compte.`,
+      4000
+    );
+    refreshSessionInfo(email);
+  });
 });
 
 $('deleteEmail').addEventListener('click', async () => {

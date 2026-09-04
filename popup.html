@@ -19,6 +19,16 @@
   <label>Comptes enregistrés (le sélectionné = actif)</label>
   <select id="emailSelect"><option value="">— aucun —</option></select>
   <div id="activeProxyInfo" class="hint">Proxy : —</div>
+  <div id="sessionInfo" class="hint">Session : —</div>
+  <div class="row">
+    <button id="restoreSession" style="flex:1">🔓 Rouvrir ce compte</button>
+    <button id="saveSession" style="flex:1">💾 Sauver la session</button>
+  </div>
+  <div class="hint">
+    « Rouvrir ce compte » restaure les cookies sauvegardés : tu reviens sur le
+    compte sans mot de passe, avec son proxy, sur la page « Mes tirages ».
+    Valable tant que la session n'a pas expiré (~48 h).
+  </div>
   <div class="row">
     <button id="deleteEmail" style="flex:1">Supprimer la sélection</button>
   </div>

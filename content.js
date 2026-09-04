@@ -333,44 +333,11 @@
   }
 
   // --- 1. Page compte -----------------------------------------------------
-  // --- Campagne multi-comptes : déconnexion pilotée par le background -----
-  // Quand une campagne est en cours et en phase "logout", cette page doit
-  // d'abord clore la session en cours avant toute autre chose. On confirme
-  // au background dès que le site n'est plus connecté (avant OU après avoir
-  // cliqué le lien de déconnexion), qui enchaîne alors sur le compte suivant.
-  async function handleCampaignLogout(myEmail) {
-    const { campaign } = await store.get(['campaign']);
-    if (!campaign || !campaign.running || campaign.phase !== 'logout') return false;
-
-    if (isLoggedIn()) {
-      const logoutLink =
-        document.querySelector('a[href*="customer-logout"]') ||
-        findByText('a', ['déconnexion', 'deconnexion', 'logout', 'log out']);
-
-      if (logoutLink) {
-        panel('Automatisation multi-comptes', [`Déconnexion de ${myEmail}...`]);
-        send('CAMPAIGN_STAGE', { stage: 'logging-out', email: myEmail });
-        // Navigation directe via location.href plutôt que logoutLink.click() :
-        // sur les thèmes qui gèrent ce lien comme un onglet (JS interceptant
-        // le clic, navigation en SPA sans rechargement réel), .click() ne
-        // déclenchait aucun rechargement de page et la campagne restait
-        // bloquée en attente d'une confirmation qui n'arrivait jamais.
-        // location.href force un vrai changement de page, quel que soit le
-        // gestionnaire JS posé sur le lien.
-        location.href = logoutLink.href;
-        return true; // la page va se recharger, rien d'autre à faire ici
-      }
-      // Pas de lien de déconnexion trouvé : on ne bloque pas la campagne,
-      // on remonte quand même le statut (le watchdog rattraperait sinon).
-    }
-
-    send('CAMPAIGN_STAGE', { stage: 'logged-out', email: myEmail });
-    return true;
-  }
-
+  // Note : la bascule entre comptes ne passe plus par le lien
+  // « Se déconnecter ». Le background sauvegarde puis efface les cookies du
+  // site (voir saveSession/clearSiteCookies), ce qui donne une session vierge
+  // sans détruire le jeton côté serveur — la session reste donc restaurable.
   async function handleAccountPage(myEmail) {
-    if (await handleCampaignLogout(myEmail)) return;
-
     if (isLoggedIn()) {
       const { filledProfiles = {}, raffleOpenedByEmail = {}, profileNames = {} } = await store.get([
         'filledProfiles',

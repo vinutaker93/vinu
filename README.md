@@ -54,6 +54,50 @@ Discord "⏱ Compte bloqué" le signale. Le bouton **⏹ Arrêter** stoppe la
 campagne à tout moment (le compte en cours va jusqu'au bout de sa page
 actuelle, rien n'est coupé en plein clic).
 
+## Ce qui a changé (v3.0) — sessions restaurables sans mot de passe
+
+### Le problème
+WooCommerce génère le mot de passe d'un nouveau compte et l'**envoie par
+email** : l'extension ne le connaît jamais. Tant qu'on cliquait sur
+« Se déconnecter » entre deux comptes, la session était **détruite côté
+serveur** (WordPress purge le jeton dans `user_meta`) — sans accès à la boîte
+mail, le compte devenait donc définitivement inaccessible.
+
+### La solution : bascule par cookies
+La campagne ne clique plus jamais sur « Se déconnecter ». À la place, quand un
+compte est terminé, le background :
+1. **sauvegarde les cookies** du site sous l'email du compte
+   (`sessionsByEmail` dans `chrome.storage.local`) ;
+2. **efface les cookies** du navigateur — session vierge pour l'inscription
+   suivante, mais le jeton reste **valide côté serveur** ;
+3. passe au compte suivant (email + proxy) et recharge la page.
+
+Deux boutons dans le popup, sur le compte sélectionné :
+- **🔓 Rouvrir ce compte** — vide les cookies courants, réinjecte ceux du
+  compte, réapplique son proxy et ouvre `/mon-compte/mes-tirages/`. Tu es
+  reconnecté **sans aucun mot de passe**.
+- **💾 Sauver la session** — sauvegarde manuellement la session actuellement
+  ouverte dans le navigateur (utile pour préserver un compte avant de faire
+  autre chose).
+
+Le popup affiche l'état de la session du compte sélectionné :
+`✅ valide encore ~46 h`, `⚠️ expirée`, ou `aucune sauvegarde`.
+
+### Limite à connaître
+Les cookies d'authentification WordPress **expirent** — environ **48 h** par
+défaut (jusqu'à 14 jours avec « se souvenir de moi », ce qui n'est pas le cas
+sur une inscription). Passé ce délai, la session restaurée sera déconnectée et,
+sans accès à la boîte mail du compte, il n'y a plus aucun moyen d'y revenir.
+**La fenêtre pour vérifier les tirages est donc d'environ deux jours après le
+passage de la campagne sur un compte.**
+
+### Simplification au passage
+La phase « déconnexion » de l'automate disparaît complètement : plus de clic à
+simuler, plus d'attente d'une confirmation du content script, plus de watchdog
+dédié. La bascule entre comptes est désormais une opération background
+déterministe (quelques centaines de ms), ce qui supprime au passage le bug de
+campagne bloquée sur le lien « Se déconnecter ».
+
 ## Ce qui a changé (v2.2)
 
 ### Correctif : la campagne restait bloquée sans se déconnecter
