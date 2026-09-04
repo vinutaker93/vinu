@@ -1,0 +1,12 @@
+# Identifiants — ne jamais committer
+mail-reader/accounts.json
+accounts.json
+*.credentials.json
+
+# Listes locales (comptes, mots de passe, etc.)
+*.txt
+!README*.txt
+
+# Python
+__pycache__/
+*.pyc

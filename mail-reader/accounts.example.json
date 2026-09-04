@@ -1,0 +1,12 @@
+[
+  {
+    "label": "Perso",
+    "email": "moi@gmail.com",
+    "app_password": "abcd efgh ijkl mnop"
+  },
+  {
+    "label": "Boulot",
+    "email": "moi.pro@gmail.com",
+    "app_password": "qrst uvwx yz01 2345"
+  }
+]
