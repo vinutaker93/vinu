@@ -3,18 +3,52 @@ set -euo pipefail
 
 echo "== Pokelite Helper CLI — installation (Mac) =="
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js introuvable."
-  if command -v brew >/dev/null 2>&1; then
-    echo "Installation via Homebrew..."
-    brew install node
-  else
-    echo "Installe Homebrew (https://brew.sh) puis relance ce script, ou installe Node.js manuellement (https://nodejs.org)."
-    exit 1
+REQUIRED_MAJOR=18
+
+node_major_version() {
+  "$1" -e "console.log(process.versions.node.split('.')[0])" 2>/dev/null || echo 0
+}
+
+# Priorise les chemins Homebrew dans le PATH pour CE script : sur certains
+# Mac, conda/Anaconda active un Node ancien (ex. 12.x) via son env "base" et
+# le fait passer avant celui d'Homebrew — `command -v node` trouve alors le
+# mauvais Node même une fois Homebrew installé. On corrige ça localement,
+# sans toucher à la config shell de l'utilisateur.
+for BREW_BIN in /opt/homebrew/bin /usr/local/bin; do
+  if [ -d "$BREW_BIN" ]; then
+    export PATH="$BREW_BIN:$PATH"
   fi
+done
+
+if ! command -v brew >/dev/null 2>&1; then
+  echo "Homebrew introuvable. Installe-le (https://brew.sh) puis relance ce script."
+  exit 1
 fi
 
-echo "Node : $(node --version)"
+CURRENT_NODE="$(command -v node || true)"
+CURRENT_MAJOR=0
+if [ -n "$CURRENT_NODE" ]; then
+  CURRENT_MAJOR="$(node_major_version "$CURRENT_NODE")"
+fi
+
+if [ "$CURRENT_MAJOR" -lt "$REQUIRED_MAJOR" ]; then
+  if [ -n "$CURRENT_NODE" ]; then
+    echo "Node trouvé ($CURRENT_NODE, v$CURRENT_MAJOR) est trop ancien pour Playwright (≥ $REQUIRED_MAJOR requis)."
+    echo "C'est fréquent avec un Node fourni par conda/Anaconda (base), qui passe avant celui d'Homebrew dans le PATH."
+  fi
+  echo "Installation de Node via Homebrew..."
+  brew install node
+  CURRENT_NODE="$(command -v node)"
+  CURRENT_MAJOR="$(node_major_version "$CURRENT_NODE")"
+fi
+
+if [ "$CURRENT_MAJOR" -lt "$REQUIRED_MAJOR" ]; then
+  echo "Node reste trop ancien (v$CURRENT_MAJOR) malgré l'installation Homebrew."
+  echo "Si tu utilises conda/Anaconda : lance 'conda deactivate' puis relance ce script."
+  exit 1
+fi
+
+echo "Node utilisé : $CURRENT_NODE ($("$CURRENT_NODE" --version))"
 
 cd "$(dirname "$0")"
 
@@ -29,3 +63,4 @@ npm link
 
 echo
 echo "Installation terminée. Essaie : pokelite --help"
+echo "(Si 'pokelite' est introuvable dans un nouveau terminal, relance ce script depuis ce même terminal.)"
