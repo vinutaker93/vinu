@@ -64,6 +64,34 @@ bloqué" le signale. Le bouton **⏹ Arrêter** stoppe la campagne à tout momen
 (le compte en cours va jusqu'au bout de sa page actuelle, rien n'est coupé en
 plein clic).
 
+## Ce qui a changé (v3.3)
+
+### Correctif : boucle infinie sur un compte au mot de passe incorrect
+Constaté en conditions réelles sur une campagne de 29 comptes : après avoir
+correctement sauté un premier compte (v3.2), le suivant restait bloqué en
+boucle au lieu de passer au compte d'après.
+
+**Cause :** `content.js` naviguait lui-même l'onglet vers
+`/mon-compte/lost-password/` **au même instant** où `background.js`, en
+train de sauter ce compte, faisait avancer ce **même onglet** vers
+`/mon-compte/` du compte suivant. Deux navigations concurrentes sur un seul
+onglet → résultat non déterministe (l'une écrasait l'autre selon le timing),
+d'où la boucle.
+
+**Correctif :** la demande de réinitialisation part maintenant dans un
+**onglet dédié**, ouvert par `background.js`
+(`openLostPasswordTab`, avec l'email transmis via `?pokelite_email=...` dans
+l'URL puisque cet onglet est indépendant du compte actif global). L'onglet
+principal de la campagne n'est plus jamais touché par cette navigation : il
+peut avancer vers le compte suivant sans aucune concurrence.
+
+Au passage, correction d'un deuxième bug repéré sur la même capture : le
+bouton de la page « mot de passe oublié » n'était pas trouvé car le libellé
+réel est **« Réinitialisation du mot de passe »** (forme nominale), alors que
+la recherche ne couvrait que « réinitialiser » (forme verbale) — élargi au
+radical commun `réinitialis`, avec un repli générique sur le premier bouton
+du formulaire.
+
 ## Ce qui a changé (v3.2)
 
 ### Correctif : la campagne restait bloquée sur un mot de passe incorrect

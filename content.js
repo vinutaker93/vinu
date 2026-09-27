@@ -436,14 +436,14 @@
           email: myEmail,
           item: 'Le mot de passe enregistré ne correspond plus à ce compte',
         });
-        // Signale au background que ce compte est dans une impasse
-        // automatique : si une campagne multi-comptes est en cours, elle
-        // doit passer au compte suivant tout de suite plutôt que d'attendre
-        // le filet de sécurité de 8 minutes (aucune participation ne
-        // pourra jamais se terminer sans connexion).
+        // Le background ouvre lui-même un onglet dédié pour la demande de
+        // réinitialisation (voir handlePasswordResetRequested) : on ne
+        // navigue PAS cet onglet nous-mêmes. Le faire ici entrerait en
+        // concurrence avec le background qui, en pleine campagne, fait au
+        // même instant avancer ce même onglet vers le compte suivant — les
+        // deux navigations se battaient sur le même onglet, d'où la boucle
+        // observée en conditions réelles.
         await send('PASSWORD_RESET_REQUESTED', { email: myEmail });
-        await sleep(400);
-        location.href = 'https://www.pokelite.fr/mon-compte/lost-password/';
         return;
       }
     }
@@ -634,27 +634,36 @@
   }
 
   // --- 1c. Mot de passe oublié --------------------------------------------
-  // Déclenchée automatiquement quand un mot de passe enregistré s'avère
-  // incorrect (voir handleAccountPage) : remplit l'email et envoie la
-  // demande de réinitialisation, comme le ferait l'utilisateur à la main.
+  // Ouverte dans un onglet DÉDIÉ par le background (voir background.js,
+  // openLostPasswordTab) quand un mot de passe enregistré s'avère incorrect
+  // — jamais dans l'onglet principal de la campagne, pour éviter que les
+  // deux ne se disputent la navigation. L'email à utiliser vient donc du
+  // paramètre d'URL ?pokelite_email=..., pas du compte actif global (qui a
+  // déjà basculé sur le compte suivant au moment où cet onglet se charge).
   async function handleLostPasswordPage(myEmail) {
+    const urlEmail = new URLSearchParams(location.search).get('pokelite_email');
+    const targetEmail = urlEmail || myEmail;
+
     const input =
       document.querySelector('#user_login') || $$('input[type="text"], input[type="email"]').filter(isVisible)[0];
     if (!input) return;
 
-    if (input.value !== myEmail) setVal(input, myEmail);
+    if (input.value !== targetEmail) setVal(input, targetEmail);
 
     const form = input.closest('form');
     const submitBtn =
       document.querySelector('button[name="wc_reset_password"]') ||
+      // « réinitialiser » ne matche pas « Réinitialisation du mot de passe »
+      // (formes verbale vs nominale) : on cherche le radical commun.
       findByText(
         'button, input[type="submit"]',
-        ['réinitialiser', 'reset password', 'envoyer', 'get new password'],
+        ['réinitialis', 'reset password', 'envoyer', 'get new password'],
         form || document
-      );
+      ) ||
+      (form && form.querySelector('button[type="submit"], input[type="submit"]'));
 
     panel('Mot de passe oublié', [
-      `Email renseigné : ${myEmail}`,
+      `Email renseigné : ${targetEmail}`,
       submitBtn
         ? 'Envoi automatique de la demande de réinitialisation...'
         : 'Bouton introuvable — clique-le toi-même.',
@@ -667,7 +676,7 @@
         status: 'info',
         title: '📧 Réinitialisation du mot de passe demandée',
         step: 'Mot de passe oublié',
-        email: myEmail,
+        email: targetEmail,
         item: 'Email de réinitialisation envoyé — à ouvrir depuis la boîte mail du compte',
       });
     }

@@ -386,11 +386,24 @@ async function skipAccount(index, reason) {
   await advanceToNextAccount(c, index);
 }
 
+// Ouvre la page « mot de passe oublié » dans un onglet DÉDIÉ (jamais
+// l'onglet principal de la campagne) : content.js y lit l'email via
+// ?pokelite_email=... et soumet la demande. Onglet séparé exprès — sinon
+// cette navigation entre en concurrence avec celle que la campagne déclenche
+// au même instant vers le compte suivant, sur le même onglet.
+function openLostPasswordTab(email) {
+  const url = `https://www.pokelite.fr/mon-compte/lost-password/?pokelite_email=${encodeURIComponent(email)}`;
+  chrome.tabs.create({ url, active: false }, () => void chrome.runtime.lastError);
+}
+
 // Le content script signale qu'un compte est dans une impasse automatique
-// (mot de passe enregistré incorrect → réinitialisation demandée, il faudra
-// relever la boîte mail à la main). On saute ce compte immédiatement au lieu
+// (mot de passe enregistré incorrect). Toujours ouvrir la demande de
+// réinitialisation dans son propre onglet ; si une campagne tourne sur ce
+// compte, la faire aussi avancer immédiatement au suivant plutôt que
 // d'attendre le watchdog de 8 minutes.
 async function handlePasswordResetRequested(email) {
+  openLostPasswordTab(email);
+
   const c = await getCampaign();
   if (!c || !c.running) return;
   const acc = c.accounts[c.index];
@@ -401,7 +414,7 @@ async function handlePasswordResetRequested(email) {
   await setCampaign(c);
   await skipAccount(
     c.index,
-    'Mot de passe enregistré incorrect : email de réinitialisation envoyé, à traiter manuellement.'
+    'Mot de passe enregistré incorrect : email de réinitialisation envoyé (nouvel onglet), à traiter manuellement.'
   );
 }
 
