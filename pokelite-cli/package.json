@@ -1,0 +1,18 @@
+{
+  "name": "pokelite-cli",
+  "version": "1.0.0",
+  "description": "Outil CLI Mac pour automatiser l'inscription et la participation au tirage Pokelite, avec un proxy dédié par compte (Playwright).",
+  "type": "module",
+  "bin": {
+    "pokelite": "bin/pokelite.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  }
+}
