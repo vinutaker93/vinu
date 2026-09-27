@@ -20,11 +20,6 @@ for BREW_BIN in /opt/homebrew/bin /usr/local/bin; do
   fi
 done
 
-if ! command -v brew >/dev/null 2>&1; then
-  echo "Homebrew introuvable. Installe-le (https://brew.sh) puis relance ce script."
-  exit 1
-fi
-
 CURRENT_NODE="$(command -v node || true)"
 CURRENT_MAJOR=0
 if [ -n "$CURRENT_NODE" ]; then
@@ -36,14 +31,24 @@ if [ "$CURRENT_MAJOR" -lt "$REQUIRED_MAJOR" ]; then
     echo "Node trouvé ($CURRENT_NODE, v$CURRENT_MAJOR) est trop ancien pour Playwright (≥ $REQUIRED_MAJOR requis)."
     echo "C'est fréquent avec un Node fourni par conda/Anaconda (base), qui passe avant celui d'Homebrew dans le PATH."
   fi
-  echo "Installation de Node via Homebrew..."
-  brew install node
-  CURRENT_NODE="$(command -v node)"
-  CURRENT_MAJOR="$(node_major_version "$CURRENT_NODE")"
+
+  if command -v brew >/dev/null 2>&1; then
+    echo "Installation de Node via Homebrew..."
+    brew install node
+    CURRENT_NODE="$(command -v node)"
+    CURRENT_MAJOR="$(node_major_version "$CURRENT_NODE")"
+  else
+    echo
+    echo "Homebrew n'est pas installé (et n'est pas obligatoire) : installe Node.js"
+    echo "directement depuis https://nodejs.org/en/download (installeur .pkg pour macOS,"
+    echo "choisis Intel ou Apple Silicon selon ta puce), puis relance ce script."
+    echo "Ferme et rouvre le Terminal après l'installation pour que 'node' soit à jour."
+    exit 1
+  fi
 fi
 
 if [ "$CURRENT_MAJOR" -lt "$REQUIRED_MAJOR" ]; then
-  echo "Node reste trop ancien (v$CURRENT_MAJOR) malgré l'installation Homebrew."
+  echo "Node reste trop ancien (v$CURRENT_MAJOR)."
   echo "Si tu utilises conda/Anaconda : lance 'conda deactivate' puis relance ce script."
   exit 1
 fi
