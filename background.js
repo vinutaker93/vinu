@@ -277,6 +277,55 @@ async function stopCampaign() {
   return { ok: true };
 }
 
+// Ferme les onglets de tirage restants du compte en cours.
+async function closeRaffleTabs(c) {
+  const tabIds = (c.raffleTabIds || []).slice();
+  c.raffleTabIds = [];
+  await setCampaign(c);
+  tabIds.forEach((id) => chrome.tabs.remove(id, () => void chrome.runtime.lastError));
+}
+
+// Bascule vers le compte suivant de la liste (ou termine la campagne si
+// c'était le dernier) : proxy + email mis à jour, page rechargée. Partagé par
+// accountFinished (succès) et skipAccount (compte dans une impasse).
+async function advanceToNextAccount(c, index) {
+  const isLast = index + 1 >= c.accounts.length;
+
+  if (isLast) {
+    c.running = false;
+    c.phase = 'done';
+    await setCampaign(c);
+    if (c.tabId) chrome.tabs.remove(c.tabId, () => void chrome.runtime.lastError);
+    await notifyDiscord({
+      status: 'success',
+      title: '🏁 Campagne terminée',
+      email: '—',
+      item: `${c.accounts.length} compte(s)`,
+      description: `Traitement terminé pour les ${c.accounts.length} comptes de la liste.`,
+    });
+    return;
+  }
+
+  c.index = index + 1;
+  c.phase = 'register';
+  c.startedAccountAt = Date.now();
+  await setCampaign(c);
+
+  const next = c.accounts[c.index];
+  await storage.set({ myEmail: next.email });
+  await applyProxy(next.proxy || null);
+
+  if (c.tabId) {
+    chrome.tabs.update(c.tabId, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
+  } else {
+    const tab = await new Promise((resolve) =>
+      chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: false }, resolve)
+    );
+    c.tabId = tab && tab.id;
+    await setCampaign(c);
+  }
+}
+
 // Un compte est terminé : ferme ses onglets, sauvegarde sa session, vide les
 // cookies du site, puis enchaîne directement sur le compte suivant.
 //
@@ -291,10 +340,7 @@ async function accountFinished(index) {
   const acc = c.accounts[index];
   if (!acc) return;
 
-  const tabIds = (c.raffleTabIds || []).slice();
-  c.raffleTabIds = [];
-  await setCampaign(c);
-  tabIds.forEach((id) => chrome.tabs.remove(id, () => void chrome.runtime.lastError));
+  await closeRaffleTabs(c);
 
   const saved = await saveSession(acc.email);
   await clearSiteCookies();
@@ -313,39 +359,50 @@ async function accountFinished(index) {
     description: isLast ? 'La campagne va se terminer.' : 'Inscription automatique du compte suivant...',
   });
 
-  if (isLast) {
-    c.running = false;
-    c.phase = 'done';
-    await setCampaign(c);
-    if (c.tabId) chrome.tabs.remove(c.tabId, () => void chrome.runtime.lastError);
-    await notifyDiscord({
-      status: 'success',
-      title: '🏁 Campagne terminée',
-      email: '—',
-      item: `${c.accounts.length} compte(s)`,
-      description: `Les ${c.accounts.length} comptes ont été traités : inscription, profil et ${RAFFLE_LINKS.length} participations chacun.`,
-    });
-    return;
-  }
+  await advanceToNextAccount(c, index);
+}
 
-  c.index += 1;
-  c.phase = 'register';
-  c.startedAccountAt = Date.now();
+// Un compte ne peut pas être terminé automatiquement (mot de passe enregistré
+// incorrect, page cassée...) : on l'ignore et on passe directement au suivant
+// plutôt que d'attendre le filet de sécurité de 8 minutes.
+async function skipAccount(index, reason) {
+  const c = await getCampaign();
+  if (!c || !c.running || c.index !== index) return;
+  const acc = c.accounts[index];
+  if (!acc) return;
+
+  await closeRaffleTabs(c);
+
+  const isLast = index + 1 >= c.accounts.length;
+  await notifyDiscord({
+    status: 'warning',
+    title: '⏭ Compte ignoré — passage au suivant',
+    email: acc.email,
+    item: reason,
+    progress: `Compte ${index + 1}/${c.accounts.length}`,
+    description: isLast ? 'La campagne va se terminer.' : 'Passage automatique au compte suivant...',
+  });
+
+  await advanceToNextAccount(c, index);
+}
+
+// Le content script signale qu'un compte est dans une impasse automatique
+// (mot de passe enregistré incorrect → réinitialisation demandée, il faudra
+// relever la boîte mail à la main). On saute ce compte immédiatement au lieu
+// d'attendre le watchdog de 8 minutes.
+async function handlePasswordResetRequested(email) {
+  const c = await getCampaign();
+  if (!c || !c.running) return;
+  const acc = c.accounts[c.index];
+  if (!acc || acc.email !== email) return; // signal obsolète ou d'un autre compte, ignoré
+  if (c.finishedIndexes[c.index]) return;
+
+  c.finishedIndexes[c.index] = true;
   await setCampaign(c);
-
-  const next = c.accounts[c.index];
-  await storage.set({ myEmail: next.email });
-  await applyProxy(next.proxy || null);
-
-  if (c.tabId) {
-    chrome.tabs.update(c.tabId, { url: 'https://www.pokelite.fr/mon-compte/' }, () => void chrome.runtime.lastError);
-  } else {
-    const tab = await new Promise((resolve) =>
-      chrome.tabs.create({ url: 'https://www.pokelite.fr/mon-compte/', active: false }, resolve)
-    );
-    c.tabId = tab && tab.id;
-    await setCampaign(c);
-  }
+  await skipAccount(
+    c.index,
+    'Mot de passe enregistré incorrect : email de réinitialisation envoyé, à traiter manuellement.'
+  );
 }
 
 // Détecte quand le compte en cours atteint toutes ses participations.
@@ -774,6 +831,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       sendResponse({ ok: true, sessions: summary });
     });
+    return true;
+  }
+
+  if (msg.type === 'PASSWORD_RESET_REQUESTED') {
+    handlePasswordResetRequested(msg.email).then(() => sendResponse({ ok: true }));
     return true;
   }
 });

@@ -436,6 +436,12 @@
           email: myEmail,
           item: 'Le mot de passe enregistré ne correspond plus à ce compte',
         });
+        // Signale au background que ce compte est dans une impasse
+        // automatique : si une campagne multi-comptes est en cours, elle
+        // doit passer au compte suivant tout de suite plutôt que d'attendre
+        // le filet de sécurité de 8 minutes (aucune participation ne
+        // pourra jamais se terminer sans connexion).
+        await send('PASSWORD_RESET_REQUESTED', { email: myEmail });
         await sleep(400);
         location.href = 'https://www.pokelite.fr/mon-compte/lost-password/';
         return;

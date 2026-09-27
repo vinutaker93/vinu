@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pokelite Helper",
-  "version": "3.1",
+  "version": "3.2",
   "description": "Traite automatiquement tous les comptes enregistrés l'un après l'autre (inscription ou connexion directe si le mot de passe est connu, prénom/nom, proxy dédié, participations au tirage), sauvegarde la session de chaque compte, et notifie Discord avec un rapport complet.",
   "permissions": [
     "storage",

@@ -64,6 +64,31 @@ bloqué" le signale. Le bouton **⏹ Arrêter** stoppe la campagne à tout momen
 (le compte en cours va jusqu'au bout de sa page actuelle, rien n'est coupé en
 plein clic).
 
+## Ce qui a changé (v3.2)
+
+### Correctif : la campagne restait bloquée sur un mot de passe incorrect
+La v3.1 ajoutait la bascule automatique vers « mot de passe oublié » quand le
+mot de passe enregistré était faux, mais **rien ne prévenait la campagne
+multi-comptes** de cette impasse : le compte ne pouvait plus jamais se
+connecter automatiquement (la réinitialisation attend que tu relèves la
+boîte mail), donc les participations ne se terminaient jamais, et la
+campagne restait figée sur ce compte jusqu'au filet de sécurité de 8 minutes
+— voire indéfiniment si quelque chose interrompait ce filet.
+
+- `content.js` envoie maintenant un message `PASSWORD_RESET_REQUESTED` au
+  moment de basculer vers la réinitialisation.
+- `background.js` l'écoute (`handlePasswordResetRequested`) et, si une
+  campagne est en cours sur ce compte, l'ignore **immédiatement** et passe
+  au compte suivant (`skipAccount`, qui partage la logique de bascule
+  compte↔proxy avec `accountFinished` via `advanceToNextAccount`) — plus
+  besoin d'attendre le watchdog. Un message Discord "⏭ Compte ignoré" le
+  signale, avec le rappel qu'il faut relever la boîte mail de ce compte.
+
+**Si une campagne était restée bloquée avec la v3.1** : clique **⏹ Arrêter**
+puis **▶️ Lancer pour tous les comptes** pour repartir — le compte concerné
+retentera sa connexion (avec le même mot de passe erroné) puis sera cette
+fois correctement ignoré, et la campagne enchaînera sur les comptes suivants.
+
 ## Ce qui a changé (v3.1)
 
 ### Liens du tirage mis à jour
