@@ -44,6 +44,29 @@
 
   <hr />
 
+  <label>Mots de passe des comptes déjà connus (perso / famille)</label>
+  <input type="file" id="passwordFile" accept=".txt" />
+  <textarea id="passwordText" placeholder="motdepasse1&#10;motdepasse2&#10;motdepasse3"></textarea>
+  <div class="row">
+    <button id="savePasswords" style="flex:1">Enregistrer les mots de passe</button>
+    <button id="clearPasswords" style="flex:1">Vider la liste</button>
+  </div>
+  <div class="hint">
+    Même règle que les proxies : la 1ʳᵉ ligne va au 1ᵉʳ email, la 2ᵉ au 2ᵉ, etc.
+    Sert pour tes propres comptes ou ceux de ta famille dont tu connais déjà le
+    mot de passe — l'extension se connecte alors directement (accès fiable,
+    sans dépendre d'une session qui expire) au lieu d'inscrire un nouveau
+    compte. Laisse la ligne vide pour un email sans mot de passe connu. Si le
+    mot de passe enregistré est faux (mémoire courte...), l'extension
+    bascule automatiquement sur « mot de passe oublié » et envoie la demande
+    de réinitialisation — va ensuite relever la boîte mail du compte. Stocké
+    uniquement en local, jamais envoyé nulle part (y compris dans le webhook
+    Discord).
+  </div>
+  <div id="passwordCount" class="hint">0 mot de passe enregistré.</div>
+
+  <hr />
+
   <label>Liste de proxies (enregistrée définitivement)</label>
   <input type="file" id="proxyFile" accept=".txt" />
   <textarea id="proxyText" placeholder="host:port&#10;host:port:user:pass&#10;user:pass@host:port"></textarea>
@@ -79,7 +102,7 @@
 
   <hr />
 
-  <button id="openLinks">Ouvrir les 7 liens du tirage</button>
+  <button id="openLinks">Ouvrir les liens du tirage</button>
   <button id="resetTracking">Réinitialiser le suivi de ce compte</button>
 
   <hr />
@@ -87,11 +110,11 @@
   <label>Automatisation multi-comptes</label>
   <div class="hint">
     Traite tous les comptes enregistrés l'un après l'autre : inscription,
-    prénom/nom, 7 participations, puis déconnexion et passage au compte
-    suivant avec son proxy associé — jusqu'au dernier de la liste.
+    prénom/nom, participations au tirage, puis changement de session et de
+    proxy vers le compte suivant — jusqu'au dernier de la liste.
     Nécessite des emails jamais utilisés sur le site (l'extension ne connaît
-    aucun mot de passe, donc elle ne peut pas se reconnecter à un compte déjà
-    inscrit).
+    aucun mot de passe, donc elle ne peut pas s'inscrire deux fois avec le
+    même email).
   </div>
   <div class="row">
     <button id="startCampaign" style="flex:1">▶️ Lancer pour tous les comptes</button>

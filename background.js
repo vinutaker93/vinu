@@ -1,18 +1,15 @@
 /* Pokelite Helper — service worker
- * - ouverture automatique des 7 liens du tirage (une fois par compte)
+ * - ouverture automatique des liens du tirage (une fois par compte)
  * - proxy par compte (persistant, associé ligne par ligne)
  * - webhook Discord fiable (file d'attente + retries) au format "rapport complet"
  */
 
-// Les 7 liens du tirage 30e anniversaire Pokémon (ME5-5)
+// Liens du tirage 30e anniversaire Pokémon (ME5-5) — source unique de
+// vérité : tout le reste (comptage, textes, avancement) en dérive via
+// RAFFLE_LINKS.length, donc changer cette liste suffit.
 const RAFFLE_LINKS = [
-  'https://www.pokelite.fr/produit/coffret-amphinobi-ex-30%e1%b5%89-anniversaire-pokemon-me5-5/',
-  'https://www.pokelite.fr/produit/coffret-nymphali-ex-30%e1%b5%89-anniversaire-pokemon-me5-5/',
-  'https://www.pokelite.fr/produit/coffret-poster-30%e1%b5%89-anniversaire-pokemon-me5-5/',
-  'https://www.pokelite.fr/produit/duopack-30%e1%b5%89-anniversaire-pokemon-me5-5/',
-  'https://www.pokelite.fr/produit/etb-30%e1%b5%89-anniversaire-pokemon-me5-5/',
-  'https://www.pokelite.fr/produit/pokebox-30%e1%b5%89-anniversaire-pokemon-me5-5/',
-  'https://www.pokelite.fr/produit/tripack-30%e1%b5%89-anniversaire-pokemon-me5-5/',
+  'https://www.pokelite.fr/produit/bundle-30%e1%b5%89-anniversaire-pokemon-me5-5/',
+  'https://www.pokelite.fr/produit/mini-tins-30%e1%b5%89-anniversaire-pokemon-me5-5/',
 ];
 
 const storage = {
@@ -24,8 +21,8 @@ const storage = {
   },
 };
 
-// --- Ouverture des 7 liens ---------------------------------------------
-// Le suivi est fait PAR EMAIL : chaque nouveau compte réouvre les 7 liens.
+// --- Ouverture des liens du tirage ---------------------------------------
+// Le suivi est fait PAR EMAIL : chaque nouveau compte réouvre les liens.
 async function openRaffleLinks(email, { force = false } = {}) {
   const key = email || '__default__';
   const { raffleOpenedByEmail = {} } = await storage.get(['raffleOpenedByEmail']);
@@ -52,7 +49,7 @@ async function openRaffleLinks(email, { force = false } = {}) {
   }
 
   // Pendant une campagne multi-comptes, ces onglets seront fermés
-  // automatiquement dès que le compte atteint 7/7 participations.
+  // automatiquement dès que le compte atteint toutes ses participations.
   const campaignForThisEmail = await getCampaign();
   if (
     campaignForThisEmail &&
@@ -69,7 +66,7 @@ async function openRaffleLinks(email, { force = false } = {}) {
     email: key,
     site: 'pokelite.fr',
     status: 'info',
-    title: '🚀 Ouverture des 7 liens du tirage',
+    title: `🚀 Ouverture des ${RAFFLE_LINKS.length} liens du tirage`,
     description: `Le compte est prêt (email + prénom/nom enregistrés). Les ${RAFFLE_LINKS.length} pages du tirage viennent d'être ouvertes automatiquement.`,
   });
 
@@ -192,9 +189,10 @@ async function restoreSession(email) {
 
 // --- Campagne multi-comptes ---------------------------------------------
 // Traite tous les comptes enregistrés l'un après l'autre, entièrement sans
-// intervention : inscription -> profil -> 7 participations -> déconnexion ->
-// compte suivant (avec le proxy associé à sa ligne), jusqu'à épuisement de
-// la liste. Piloté par un petit automate stocké dans chrome.storage.local.
+// intervention : inscription -> profil -> participations -> sauvegarde de la
+// session -> compte suivant (avec le proxy associé à sa ligne), jusqu'à
+// épuisement de la liste. Piloté par un petit automate stocké dans
+// chrome.storage.local.
 const ACCOUNT_TIMEOUT_MS = 8 * 60 * 1000; // sécurité anti-blocage : inscription/participations
 
 async function getCampaign() {
@@ -247,7 +245,7 @@ async function startCampaign() {
     item: `${campaign.accounts.length} compte(s) au total`,
     progress: `Compte 1/${campaign.accounts.length}`,
     description:
-      'Inscription, profil puis 7 participations pour chaque compte, avec déconnexion et changement de proxy automatiques entre chacun.',
+      `Inscription, profil puis ${RAFFLE_LINKS.length} participations pour chaque compte, avec changement de session et de proxy automatique entre chacun.`,
   });
 
   return { ok: true, count: campaign.accounts.length };
@@ -350,7 +348,7 @@ async function accountFinished(index) {
   }
 }
 
-// Détecte quand le compte en cours atteint 7/7 participations.
+// Détecte quand le compte en cours atteint toutes ses participations.
 async function onDoneByEmailChanged(doneByEmail) {
   const c = await getCampaign();
   if (!c || !c.running || c.phase !== 'register') return;
@@ -371,7 +369,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // Filet de sécurité : si un compte reste bloqué (page cassée, case
-// introuvable, déconnexion qui échoue...) on force le passage au suivant
+// introuvable, session qui ne se sauvegarde pas...) on force le passage au suivant
 // plutôt que de laisser la campagne geler indéfiniment.
 async function checkCampaignWatchdog() {
   const c = await getCampaign();
@@ -552,21 +550,15 @@ const BRAND = 'TIGRE AIO';
 const DEFAULT_LOGO =
   'https://cdn.discordapp.com/attachments/1023333501312962690/1545161251431121037/image-1788465467838.png?ex=6a9b230e&is=6a99d18e&hm=ca1e5b8efbcba2e08c9b185c0f1bad0faa31b8de25f6261a14500958ed23ac41&';
 
-// Valeur affichée à la place de toute donnée confidentielle.
-const HIDDEN = '///';
-
-// Retire toute trace du site, des URLs et du nom des produits dans les textes
-// libres : rien d'identifiable ne doit sortir dans le webhook.
-function scrub(text) {
-  if (!text) return text;
-  return String(text)
-    .replace(/https?:\/\/\S+/gi, HIDDEN)
-    .replace(/\bwww\.\S+/gi, HIDDEN)
-    .replace(/pokelite(\.fr)?/gi, HIDDEN)
-    .replace(/pok[ée]mon/gi, HIDDEN);
+// Masque uniquement les identifiants du proxy (jamais le user:pass), le
+// reste de l'embed est en clair — outil perso, plus une extension partagée.
+function maskProxy(line) {
+  const p = line ? parseProxyLine(line) : null;
+  if (!p) return null;
+  return p.username ? `${p.host}:${p.port} (auth)` : `${p.host}:${p.port}`;
 }
 
-function buildEmbed(payload, logoUrl) {
+function buildEmbed(payload, logoUrl, proxyLine) {
   const ts = payload.timestamp || Date.now();
   const { date, time, iso } = frDateTime(ts);
   const status = payload.status || 'info';
@@ -574,31 +566,34 @@ function buildEmbed(payload, logoUrl) {
 
   const fields = [
     { name: '📧 Compte', value: `\`${payload.email || '—'}\``, inline: true },
-    { name: '🌐 Site', value: 'private', inline: true },
+    { name: '🌐 Site', value: payload.site || 'pokelite.fr', inline: true },
     { name: '📌 Statut', value: STATUS_LABEL[status] || status, inline: true },
-    { name: '🎁 Produit', value: HIDDEN, inline: true },
   ];
 
-  if (payload.step) fields.push({ name: '🧩 Étape', value: scrub(payload.step), inline: true });
+  if (payload.item) fields.push({ name: '🎁 Produit', value: payload.item, inline: false });
+  if (payload.step) fields.push({ name: '🧩 Étape', value: payload.step, inline: true });
   if (payload.profileName)
     fields.push({ name: '👤 Identité', value: payload.profileName, inline: true });
-  fields.push({ name: '🔌 Proxy', value: HIDDEN, inline: true });
+  const maskedProxy = maskProxy(proxyLine);
+  if (maskedProxy) fields.push({ name: '🔌 Proxy', value: maskedProxy, inline: true });
   fields.push({ name: '📅 Date', value: date, inline: true });
   fields.push({ name: '⏰ Heure', value: `${time} (heure locale)`, inline: true });
   if (payload.progress) fields.push({ name: '📊 Avancement', value: payload.progress, inline: true });
-  if (payload.detail) fields.push({ name: '📝 Détail', value: scrub(payload.detail).slice(0, 1000), inline: false });
+  if (payload.detail) fields.push({ name: '📝 Détail', value: String(payload.detail).slice(0, 1000), inline: false });
 
-  // Aucun lien n'est jamais publié : ni titre cliquable, ni champ « page ».
   const embed = {
     author: { name: BRAND, icon_url: logo },
-    title: scrub(payload.title || STATUS_LABEL[status] || BRAND),
+    title: payload.title || STATUS_LABEL[status] || BRAND,
     color: COLORS[status] || COLORS.info,
     fields,
-    thumbnail: { url: logo },
     footer: { text: `${BRAND} • ${payload.email || 'compte inconnu'}`, icon_url: logo },
     timestamp: iso,
   };
-  if (payload.description) embed.description = scrub(payload.description).slice(0, 3800);
+  if (payload.description) embed.description = String(payload.description).slice(0, 3800);
+  // Lien de la page produit : titre cliquable, en clair.
+  if (payload.url) embed.url = payload.url;
+  // Image du produit en vignette (repli sur le logo si absente).
+  embed.thumbnail = { url: payload.image || logo };
 
   return embed;
 }
@@ -663,7 +658,11 @@ chrome.alarms.onAlarm.addListener((a) => {
 });
 
 async function notifyDiscord(payload) {
-  const { webhookUrl, logoUrl } = await storage.get(['webhookUrl', 'logoUrl']);
+  const { webhookUrl, logoUrl, activeProxyLine } = await storage.get([
+    'webhookUrl',
+    'logoUrl',
+    'activeProxyLine',
+  ]);
   if (!webhookUrl) return { ok: false, error: 'Aucun webhook configuré' };
 
   // Anti-doublon : même compte + même page + même statut dans les 15 s.
@@ -682,7 +681,7 @@ async function notifyDiscord(payload) {
   const body = {
     username: BRAND,
     avatar_url: logoUrl || DEFAULT_LOGO,
-    embeds: [buildEmbed(payload, logoUrl)],
+    embeds: [buildEmbed(payload, logoUrl, activeProxyLine)],
   };
 
   // 3 tentatives immédiates avec backoff, puis mise en file d'attente.

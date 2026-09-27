@@ -4,6 +4,12 @@
   const IS_TOP = window.top === window;
   const SITE = 'pokelite.fr';
 
+  // Nombre de liens du tirage, récupéré une fois auprès du background (seule
+  // source de vérité : RAFFLE_LINKS dans background.js). Évite de dupliquer
+  // le chiffre en dur ici — c'est justement ce qui avait désynchronisé
+  // l'affichage la dernière fois que le nombre de liens a changé.
+  let RAFFLE_COUNT = 0;
+
   // --- Helpers DOM (traverse aussi les shadow roots) ----------------------
   function collectRoots(root = document, acc = []) {
     acc.push(root);
@@ -118,6 +124,30 @@
       !!document.querySelector('.woocommerce-MyAccount-navigation, a[href*="customer-logout"]') ||
       !!findByText('a', ['déconnexion', 'deconnexion', 'logout', 'log out'])
     );
+  }
+
+  // Trouve le formulaire « Se connecter » WooCommerce (distinct du
+  // formulaire d'inscription, présents tous les deux sur /mon-compte/).
+  // Repère standard : champ mot de passe dans un <form>, avec son champ
+  // identifiant/email juste à côté.
+  function findLoginForm() {
+    const passwordInput = document.querySelector(
+      'form input[type="password"][name="password"], form input[type="password"]'
+    );
+    if (!passwordInput) return null;
+    const form = passwordInput.closest('form');
+    if (!form) return null;
+
+    const usernameInput =
+      form.querySelector('input[name="username"]') ||
+      form.querySelector('input[type="text"], input[type="email"]');
+    if (!usernameInput) return null;
+
+    const submitBtn =
+      form.querySelector('button[name="login"], button[type="submit"], input[type="submit"]') ||
+      findByText('button, input[type="submit"]', ['se connecter', 'log in', 'sign in', 'connexion'], form);
+
+    return { form, usernameInput, passwordInput, submitBtn };
   }
 
   function productName() {
@@ -354,15 +384,15 @@
       }
 
       if (raffleOpenedByEmail[myEmail]) {
-        panel('Compte prêt ✅', ['Les 7 liens du tirage ont déjà été ouverts pour ce compte.'], [
+        panel('Compte prêt ✅', [`Les ${RAFFLE_COUNT} liens du tirage ont déjà été ouverts pour ce compte.`], [
           {
-            label: 'Ré-ouvrir les 7 liens du tirage',
+            label: `Ré-ouvrir les ${RAFFLE_COUNT} liens du tirage`,
             onClick: () => send('OPEN_RAFFLE_LINKS', { email: myEmail }),
           },
         ]);
       } else {
         const n = profileNames[myEmail];
-        panel('Compte prêt ✅', ['Ouverture automatique des 7 liens du tirage...']);
+        panel('Compte prêt ✅', [`Ouverture automatique des ${RAFFLE_COUNT} liens du tirage...`]);
         report({
           status: 'success',
           title: '🆕 Compte prêt',
@@ -370,14 +400,94 @@
           email: myEmail,
           item: 'Compte Pokelite',
           profileName: n ? `${n.firstName} ${n.lastName}` : '—',
-          description: 'Compte créé et profil (prénom/nom) enregistré. Ouverture des 7 liens du tirage.',
+          description: `Compte créé et profil (prénom/nom) enregistré. Ouverture des ${RAFFLE_COUNT} liens du tirage.`,
         });
         send('ACCOUNT_READY', { email: myEmail });
       }
       return;
     }
 
-    // Pas connecté : pré-remplissage du formulaire d'inscription
+    // On vient peut-être de tenter une connexion avec un mot de passe
+    // enregistré (voir plus bas) : la page s'est rechargée, toujours pas
+    // connecté. Si le site signale une erreur, le mot de passe retenu est
+    // faux (mémoire courte, mot de passe changé...) — on bascule alors
+    // automatiquement sur « mot de passe oublié » pour cet email, ce qui
+    // envoie le mail de réinitialisation.
+    const { loginAttempted = {} } = await store.get(['loginAttempted']);
+    if (loginAttempted[myEmail]) {
+      delete loginAttempted[myEmail];
+      await store.set({ loginAttempted });
+
+      const loginFailed =
+        !!document.querySelector('.woocommerce-error, .woocommerce-notice.woocommerce-error') ||
+        /mot de passe (est )?(incorrect|invalide|erron[ée])|identifiants? incorrects?|invalid username|incorrect password/i.test(
+          (document.body.innerText || '').toLowerCase()
+        );
+
+      if (loginFailed) {
+        panel('Connexion', [
+          `Le mot de passe enregistré pour ${myEmail} ne fonctionne pas.`,
+          'Demande de réinitialisation en cours (mot de passe oublié)...',
+        ]);
+        report({
+          status: 'warning',
+          title: '⚠️ Mot de passe incorrect — réinitialisation demandée',
+          step: 'Connexion (compte existant)',
+          email: myEmail,
+          item: 'Le mot de passe enregistré ne correspond plus à ce compte',
+        });
+        await sleep(400);
+        location.href = 'https://www.pokelite.fr/mon-compte/lost-password/';
+        return;
+      }
+    }
+
+    // Si on connaît déjà le mot de passe de ce compte (perso / famille), on
+    // se connecte directement au lieu d'essayer de l'inscrire — accès fiable
+    // qui ne dépend pas d'une session susceptible d'expirer.
+    const { accounts = [], passwordLines = [] } = await store.get(['accounts', 'passwordLines']);
+    const accIdx = accounts.findIndex((a) => a.email === myEmail);
+    const password = accIdx !== -1 ? passwordLines[accIdx] || '' : '';
+
+    if (password) {
+      const login = findLoginForm();
+      if (login) {
+        setVal(login.usernameInput, myEmail);
+        setVal(login.passwordInput, password);
+
+        panel('Connexion', [
+          `Mot de passe connu pour ${myEmail}.`,
+          login.submitBtn ? 'Connexion automatique...' : 'Bouton de connexion introuvable — clique-le toi-même.',
+        ]);
+
+        if (login.submitBtn) {
+          // Mémorise la tentative : si on retombe encore déconnecté au
+          // prochain chargement, c'est que ce mot de passe est faux (voir
+          // plus haut, en tête de handleAccountPage).
+          await store.set({
+            loginAttempted: Object.assign({}, (await store.get(['loginAttempted'])).loginAttempted, {
+              [myEmail]: true,
+            }),
+          });
+          await sleep(400);
+          login.submitBtn.click();
+          report({
+            status: 'info',
+            title: '🔑 Connexion envoyée',
+            step: 'Connexion (compte existant)',
+            email: myEmail,
+            item: 'Connexion à un compte déjà inscrit',
+          });
+        }
+        return;
+      }
+      // Formulaire de connexion introuvable sur cette page : on retombe sur
+      // le comportement d'inscription ci-dessous (peu probable sur
+      // /mon-compte/, mais on ne bloque pas la page pour autant).
+    }
+
+    // Pas connecté (ou pas de mot de passe connu) : pré-remplissage du
+    // formulaire d'inscription
     const emailInputs = $$('input[type="email"], input[name*="email" i]').filter(isVisible);
     if (emailInputs.length === 0) return;
 
@@ -447,7 +557,7 @@
       'raffleOpenedByEmail',
     ]);
 
-    // Déjà fait : on enchaîne directement sur l'ouverture des 7 liens.
+    // Déjà fait : on enchaîne directement sur l'ouverture des liens.
     if (filledProfiles[myEmail] && firstInput.value.trim() && lastInput.value.trim()) {
       panel('Profil', [`Prénom / nom déjà renseignés (${firstInput.value} ${lastInput.value}).`]);
       if (!raffleOpenedByEmail[myEmail]) {
@@ -458,7 +568,7 @@
           email: myEmail,
           item: 'Compte Pokelite',
           profileName: `${firstInput.value} ${lastInput.value}`,
-          description: 'Prénom et nom enregistrés. Ouverture automatique des 7 liens du tirage.',
+          description: `Prénom et nom enregistrés. Ouverture automatique des ${RAFFLE_COUNT} liens du tirage.`,
         });
         await send('ACCOUNT_READY', { email: myEmail });
       }
@@ -492,7 +602,7 @@
       saveBtn.click();
 
       // Après la sauvegarde WooCommerce recharge la page : on attend la
-      // confirmation puis on déclenche l'ouverture des 7 liens SANS clic manuel.
+      // confirmation puis on déclenche l'ouverture des liens SANS clic manuel.
       const confirmed = await waitFor(
         () =>
           document.querySelector('.woocommerce-message') ||
@@ -509,11 +619,51 @@
         item: 'Compte Pokelite',
         profileName: `${name.firstName} ${name.lastName}`,
         description: confirmed
-          ? 'Prénom et nom enregistrés. Ouverture automatique des 7 liens du tirage.'
-          : 'Prénom et nom soumis (confirmation non détectée). Ouverture des 7 liens du tirage.',
+          ? `Prénom et nom enregistrés. Ouverture automatique des ${RAFFLE_COUNT} liens du tirage.`
+          : `Prénom et nom soumis (confirmation non détectée). Ouverture des ${RAFFLE_COUNT} liens du tirage.`,
       });
 
       await send('ACCOUNT_READY', { email: myEmail });
+    }
+  }
+
+  // --- 1c. Mot de passe oublié --------------------------------------------
+  // Déclenchée automatiquement quand un mot de passe enregistré s'avère
+  // incorrect (voir handleAccountPage) : remplit l'email et envoie la
+  // demande de réinitialisation, comme le ferait l'utilisateur à la main.
+  async function handleLostPasswordPage(myEmail) {
+    const input =
+      document.querySelector('#user_login') || $$('input[type="text"], input[type="email"]').filter(isVisible)[0];
+    if (!input) return;
+
+    if (input.value !== myEmail) setVal(input, myEmail);
+
+    const form = input.closest('form');
+    const submitBtn =
+      document.querySelector('button[name="wc_reset_password"]') ||
+      findByText(
+        'button, input[type="submit"]',
+        ['réinitialiser', 'reset password', 'envoyer', 'get new password'],
+        form || document
+      );
+
+    panel('Mot de passe oublié', [
+      `Email renseigné : ${myEmail}`,
+      submitBtn
+        ? 'Envoi automatique de la demande de réinitialisation...'
+        : 'Bouton introuvable — clique-le toi-même.',
+    ]);
+
+    if (submitBtn) {
+      await sleep(400);
+      submitBtn.click();
+      report({
+        status: 'info',
+        title: '📧 Réinitialisation du mot de passe demandée',
+        step: 'Mot de passe oublié',
+        email: myEmail,
+        item: 'Email de réinitialisation envoyé — à ouvrir depuis la boîte mail du compte',
+      });
     }
   }
 
@@ -628,7 +778,7 @@
     async function progressLine() {
       const fresh = (await store.get(['doneByEmail'])).doneByEmail || {};
       const n = Object.keys(fresh[myEmail] || {}).length;
-      return `${n}/7 tirages traités pour ce compte`;
+      return `${n}/${RAFFLE_COUNT} tirages traités pour ce compte`;
     }
 
     // La case et le bouton apparaissent parfois après le chargement (JS du
@@ -805,8 +955,13 @@
     const email = myEmail || 'CHANGE_ME@example.com';
     const path = location.pathname;
 
+    const linksInfo = await send('GET_RAFFLE_LINKS');
+    RAFFLE_COUNT = (linksInfo && linksInfo.links && linksInfo.links.length) || 0;
+
     if (path.includes('/mon-compte/edit-account')) {
       if (IS_TOP) handleEditAccountPage(email);
+    } else if (path.includes('/mon-compte/lost-password')) {
+      if (IS_TOP) handleLostPasswordPage(email);
     } else if (path.includes('/mon-compte')) {
       if (IS_TOP) handleAccountPage(email);
     } else if (path.includes('/product-category/')) {

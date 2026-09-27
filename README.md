@@ -1,8 +1,9 @@
 # Pokelite Helper (extension Chrome)
 
 Automatisation du tirage 30ᵉ anniversaire Pokémon sur pokelite.fr :
-inscription, prénom/nom, ouverture des 7 liens, cochage de la case,
-clic sur « Je participe » et rapport Discord.
+inscription (ou connexion directe si le mot de passe est connu), prénom/nom,
+ouverture des liens du tirage, cochage de la case, clic sur « Je participe »
+et rapport Discord.
 
 ## Installation
 
@@ -12,47 +13,90 @@ clic sur « Je participe » et rapport Discord.
 ## Utilisation
 
 1. Ouvrir le popup, importer le `.txt` des emails (un par ligne).
-2. Importer (ou coller) la liste de proxies puis **Enregistrer la liste**.
+2. **Si tu connais déjà le mot de passe de certains comptes** (comptes
+   perso / famille) : colle-les dans la liste dédiée puis **Enregistrer les
+   mots de passe** — même règle que les proxies (ligne 1 ↔ 1ᵉʳ email, laisse
+   une ligne vide pour un compte sans mot de passe connu). L'extension se
+   connectera directement sur ces comptes au lieu d'essayer de les inscrire.
+3. Importer (ou coller) la liste de proxies puis **Enregistrer la liste**.
    La ligne 1 va au compte 1, la ligne 2 au compte 2, etc.
-   **La liste est conservée définitivement** : changer de compte ne l'efface plus.
-3. Renseigner l'URL du webhook Discord et cliquer **Tester le webhook**.
-4. Choisir le compte actif dans la liste (le proxy correspondant est appliqué
+   **Ces deux listes sont conservées définitivement** : changer de compte ne
+   les efface plus.
+4. Renseigner l'URL du webhook Discord et cliquer **Tester le webhook**.
+5. Choisir le compte actif dans la liste (le proxy correspondant est appliqué
    automatiquement si la case « Activer automatiquement le proxy » est cochée).
-5. Aller sur `https://www.pokelite.fr/mon-compte/` : l'extension remplit
-   l'email, puis le prénom/nom, puis **ouvre toute seule les 7 liens** du tirage.
-6. Sur chaque page produit, la case est cochée et « Je participe » cliqué
+6. Aller sur `https://www.pokelite.fr/mon-compte/` : l'extension se connecte
+   (si le mot de passe est connu) ou s'inscrit, remplit le prénom/nom, puis
+   **ouvre toute seule les liens** du tirage.
+7. Sur chaque page produit, la case est cochée et « Je participe » cliqué
    automatiquement ; un rapport Discord est envoyé pour chacune.
-7. Pour traiter **tous les comptes automatiquement** à la suite, clique
+8. Pour traiter **tous les comptes automatiquement** à la suite, clique
    **▶️ Lancer pour tous les comptes** dans le popup (voir ci-dessous).
 
-## Automatisation multi-comptes (v2.1)
+## Automatisation multi-comptes
 
 Le bouton **▶️ Lancer pour tous les comptes** traite la liste entière, sans
 intervention :
 
-1. Applique le proxy du 1ᵉʳ compte, ouvre `/mon-compte/`, s'inscrit avec le
-   1ᵉʳ email, renseigne prénom/nom, ouvre les 7 liens et participe à chacun.
-2. Une fois les 7 confirmées : se **déconnecte** du site (clic sur le vrai
-   lien « Déconnexion »), ferme les 7 onglets, puis **change de proxy** pour
-   celui du 2ᵉ compte et s'inscrit avec le 2ᵉ email.
+1. Applique le proxy du 1ᵉʳ compte, ouvre `/mon-compte/`, se connecte (mot de
+   passe connu) ou s'inscrit avec le 1ᵉʳ email, renseigne prénom/nom, ouvre
+   les liens du tirage et participe à chacun.
+2. Une fois toutes les participations confirmées : sauvegarde la session du
+   compte, passe au proxy du compte suivant, et enchaîne avec son email.
 3. Répète pour chaque compte de la liste, dans l'ordre, jusqu'au dernier.
 4. Un message Discord marque le début, chaque changement de compte et la fin
    de la campagne. Le popup affiche l'avancement en direct (`Compte 3/12 —
    email — inscription / participations en cours...`).
 
-**⚠️ Limite importante** : l'extension n'a jamais accès au mot de passe du
-compte (WooCommerce le génère et l'envoie par email). Elle peut donc
-**créer** un compte et rester connectée dessus le temps de participer, mais
-elle ne peut pas se reconnecter plus tard à un compte déjà inscrit lors d'une
-campagne précédente. **Utilise toujours des emails neufs, jamais encore
-inscrits sur le site**, pour que l'automatisation fonctionne de bout en bout.
+**⚠️ Limite pour les comptes sans mot de passe connu** : WooCommerce génère
+le mot de passe d'un nouveau compte et l'envoie par email — l'extension ne le
+connaît jamais dans ce cas. Elle peut donc **créer** le compte et rester
+connectée le temps de participer, mais **utilise des emails neufs, jamais
+encore inscrits sur le site**, pour que l'inscription fonctionne de bout en
+bout. Cette limite ne s'applique pas aux comptes dont tu as renseigné le mot
+de passe : ceux-là se reconnectent à volonté, sans dépendre d'une session qui
+expire.
 
 **Sécurité anti-blocage** : si un compte reste bloqué plus de 8 minutes (case
-introuvable, page cassée, déconnexion qui échoue...), la campagne l'ignore
-automatiquement et passe au suivant plutôt que de rester figée — un message
-Discord "⏱ Compte bloqué" le signale. Le bouton **⏹ Arrêter** stoppe la
-campagne à tout moment (le compte en cours va jusqu'au bout de sa page
-actuelle, rien n'est coupé en plein clic).
+introuvable, page cassée...), la campagne l'ignore automatiquement et passe
+au suivant plutôt que de rester figée — un message Discord "⏱ Compte
+bloqué" le signale. Le bouton **⏹ Arrêter** stoppe la campagne à tout moment
+(le compte en cours va jusqu'au bout de sa page actuelle, rien n'est coupé en
+plein clic).
+
+## Ce qui a changé (v3.1)
+
+### Liens du tirage mis à jour
+- Les 7 anciens liens sont remplacés par les **2 liens actuels** (bundle,
+  mini-tins), définis dans `RAFFLE_LINKS` (`background.js`) — seule source de
+  vérité.
+- Tous les textes qui affichaient « 7 » en dur (background.js, content.js,
+  popup) sont désormais dérivés de `RAFFLE_LINKS.length` (côté popup/content,
+  récupéré via le message `GET_RAFFLE_LINKS`) : changer la liste de liens ne
+  demande plus qu'une seule modification.
+
+### Webhook Discord en clair
+Le format masqué (`private`, `///`, aucun lien) des v2/v3.0 est abandonné :
+l'embed affiche maintenant le **site réel**, le **nom du produit**, un
+**titre cliquable vers la page**, et son **image en vignette**. Seuls les
+identifiants du proxy restent masqués (`host:port` visible, jamais le
+user:pass).
+
+### Comptes perso / famille : connexion directe + mot de passe oublié
+- Nouvelle liste dans le popup pour coller les **mots de passe** de comptes
+  déjà existants (les tiens, ceux de ta famille), associée ligne à ligne aux
+  emails comme les proxies.
+- Quand un mot de passe est enregistré pour l'email actif, `content.js`
+  remplit et soumet le **vrai formulaire de connexion** WooCommerce
+  (`findLoginForm`) au lieu du formulaire d'inscription — accès qui ne
+  dépend plus d'une session à durée limitée.
+- Si ce mot de passe s'avère incorrect (détection du message d'erreur
+  WooCommerce au rechargement), l'extension bascule **automatiquement** sur
+  `/mon-compte/lost-password/`, remplit l'email et envoie la demande de
+  réinitialisation — il ne reste plus qu'à aller relever la boîte mail du
+  compte pour définir un nouveau mot de passe.
+- Le mot de passe n'est utilisé que localement pour remplir ce formulaire :
+  il n'apparaît jamais dans un message `report()`/Discord.
 
 ## Ce qui a changé (v3.0) — sessions restaurables sans mot de passe
 

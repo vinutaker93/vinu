@@ -11,6 +11,9 @@ const sessionInfoEl = $('sessionInfo');
 const webhookEl = $('webhook');
 const logoEl = $('logo');
 const emailFileEl = $('emailFile');
+const passwordFileEl = $('passwordFile');
+const passwordTextEl = $('passwordText');
+const passwordCountEl = $('passwordCount');
 const proxyFileEl = $('proxyFile');
 const proxyTextEl = $('proxyText');
 const proxyCountEl = $('proxyCount');
@@ -28,9 +31,11 @@ const store = {
   set: (obj) => new Promise((r) => chrome.storage.local.set(obj, r)),
 };
 
-// État : accounts = [{ email }], proxyLines = ['ligne1', 'ligne2', ...]
-// Le proxy d'un compte = proxyLines[index du compte]. La liste de proxies est
-// stockée séparément des comptes : elle survit à tout changement de compte.
+// État : accounts = [{ email }], proxyLines = ['ligne1', 'ligne2', ...],
+// passwordLines = ['mdp1', 'mdp2', ...]. Le proxy/mot de passe d'un compte =
+// proxyLines[index]/passwordLines[index] du compte. Ces deux listes sont
+// stockées séparément des comptes : elles survivent à tout changement de
+// compte (même principe pour les deux, même bug évité).
 async function loadAll() {
   const data = await store.get([
     'myEmail',
@@ -39,6 +44,7 @@ async function loadAll() {
     'webhookUrl',
     'logoUrl',
     'proxyLines',
+    'passwordLines',
     'autoApplyProxy',
   ]);
 
@@ -54,10 +60,13 @@ async function loadAll() {
     proxyLines = accounts.map((a) => a.proxy || '').filter(Boolean);
   }
 
+  const passwordLines = data.passwordLines || [];
+
   return {
     myEmail: data.myEmail || '',
     accounts,
     proxyLines,
+    passwordLines,
     webhookUrl: data.webhookUrl || '',
     logoUrl: data.logoUrl || DEFAULT_LOGO,
     autoApplyProxy: data.autoApplyProxy !== false,
@@ -70,7 +79,13 @@ function proxyFor(accounts, proxyLines, email) {
   return proxyLines[i] || '';
 }
 
-function render({ myEmail, accounts, proxyLines }) {
+function passwordFor(accounts, passwordLines, email) {
+  const i = accounts.findIndex((a) => a.email === email);
+  if (i === -1) return '';
+  return passwordLines[i] || '';
+}
+
+function render({ myEmail, accounts, proxyLines, passwordLines }) {
   emailSelectEl.innerHTML = '';
   const empty = document.createElement('option');
   empty.value = '';
@@ -80,7 +95,8 @@ function render({ myEmail, accounts, proxyLines }) {
   accounts.forEach((acc, i) => {
     const opt = document.createElement('option');
     opt.value = acc.email;
-    opt.textContent = `${i + 1}. ${acc.email}${proxyLines[i] ? ' (proxy)' : ''}`;
+    const tags = [proxyLines[i] ? 'proxy' : '', passwordLines[i] ? 'mdp' : ''].filter(Boolean);
+    opt.textContent = `${i + 1}. ${acc.email}${tags.length ? ` (${tags.join(', ')})` : ''}`;
     emailSelectEl.appendChild(opt);
   });
 
@@ -90,7 +106,10 @@ function render({ myEmail, accounts, proxyLines }) {
   activeProxyInfoEl.textContent = `Proxy : ${p || '—'}`;
   proxyCountEl.textContent = `${proxyLines.length} proxy(s) enregistré(s) · ${accounts.length} compte(s).`;
   proxyTextEl.value = proxyLines.join('\n');
+  passwordCountEl.textContent = `${passwordLines.filter(Boolean).length} mot(s) de passe enregistré(s) · ${accounts.length} compte(s).`;
+  passwordTextEl.value = passwordLines.join('\n');
   refreshSessionInfo(myEmail);
+  refreshRaffleButtonLabel();
 }
 
 // --- Sessions -----------------------------------------------------------
@@ -140,14 +159,19 @@ async function refresh() {
   logoEl.value = state.logoUrl;
   autoProxyEl.checked = state.autoApplyProxy;
   // On persiste la forme normalisée dès l'ouverture (migration incluse).
-  await store.set({ accounts: state.accounts, proxyLines: state.proxyLines, logoUrl: state.logoUrl });
+  await store.set({
+    accounts: state.accounts,
+    proxyLines: state.proxyLines,
+    passwordLines: state.passwordLines,
+    logoUrl: state.logoUrl,
+  });
 })();
 
 // --- Comptes ------------------------------------------------------------
 $('save').addEventListener('click', async () => {
   const email = emailEl.value.trim();
   const webhookUrl = webhookEl.value.trim();
-  const { accounts, proxyLines } = await loadAll();
+  const { accounts, proxyLines, passwordLines } = await loadAll();
   if (email && !accounts.some((a) => a.email === email)) accounts.push({ email });
   await store.set({
     myEmail: email,
@@ -156,7 +180,7 @@ $('save').addEventListener('click', async () => {
     logoUrl: logoEl.value.trim() || DEFAULT_LOGO,
     autoApplyProxy: autoProxyEl.checked,
   });
-  render({ myEmail: email, accounts, proxyLines });
+  render({ myEmail: email, accounts, proxyLines, passwordLines });
   flashStatus('Sauvegardé.', 1500);
 });
 
@@ -164,11 +188,11 @@ emailSelectEl.addEventListener('change', async () => {
   const email = emailSelectEl.value;
   if (!email) return;
   emailEl.value = email;
-  const { accounts, proxyLines } = await loadAll();
-  // NOTE : on ne touche jamais à proxyLines ici — c'est ce qui effaçait
-  // la liste de proxies à chaque changement de compte.
+  const { accounts, proxyLines, passwordLines } = await loadAll();
+  // NOTE : on ne touche jamais à proxyLines/passwordLines ici — c'est ce qui
+  // effaçait ces listes à chaque changement de compte.
   await store.set({ myEmail: email });
-  render({ myEmail: email, accounts, proxyLines });
+  render({ myEmail: email, accounts, proxyLines, passwordLines });
 
   const proxy = proxyFor(accounts, proxyLines, email);
   if (autoProxyEl.checked && proxy) {
@@ -213,16 +237,18 @@ $('saveSession').addEventListener('click', () => {
 $('deleteEmail').addEventListener('click', async () => {
   const toRemove = emailSelectEl.value;
   if (!toRemove) return flashStatus('Sélectionne un compte à supprimer.');
-  const { myEmail, accounts, proxyLines } = await loadAll();
+  const { myEmail, accounts, proxyLines, passwordLines } = await loadAll();
   const idx = accounts.findIndex((a) => a.email === toRemove);
   if (idx === -1) return;
   accounts.splice(idx, 1);
-  // Le proxy de la même ligne part avec le compte pour garder l'alignement.
+  // Le proxy et le mot de passe de la même ligne partent avec le compte pour
+  // garder l'alignement.
   if (idx < proxyLines.length) proxyLines.splice(idx, 1);
+  if (idx < passwordLines.length) passwordLines.splice(idx, 1);
   const newActive = myEmail === toRemove ? (accounts[0] ? accounts[0].email : '') : myEmail;
   emailEl.value = newActive;
-  await store.set({ accounts, proxyLines, myEmail: newActive });
-  render({ myEmail: newActive, accounts, proxyLines });
+  await store.set({ accounts, proxyLines, passwordLines, myEmail: newActive });
+  render({ myEmail: newActive, accounts, proxyLines, passwordLines });
   flashStatus('Compte supprimé.', 1500);
 });
 
@@ -236,7 +262,7 @@ emailFileEl.addEventListener('change', (e) => {
     if (!matches) return flashStatus('Aucun email trouvé dans le fichier.');
     const found = Array.from(new Set(matches.map((m) => m.trim())));
 
-    const { myEmail, accounts, proxyLines } = await loadAll();
+    const { myEmail, accounts, proxyLines, passwordLines } = await loadAll();
     let added = 0;
     found.forEach((email) => {
       if (!accounts.some((a) => a.email === email)) {
@@ -247,7 +273,7 @@ emailFileEl.addEventListener('change', (e) => {
     const activeEmail = myEmail || found[0];
     emailEl.value = activeEmail;
     await store.set({ accounts, myEmail: activeEmail });
-    render({ myEmail: activeEmail, accounts, proxyLines });
+    render({ myEmail: activeEmail, accounts, proxyLines, passwordLines });
     flashStatus(`${found.length} email(s) trouvé(s), ${added} ajouté(s).`, 2500);
   };
   reader.onerror = () => flashStatus('Impossible de lire le fichier.');
@@ -264,9 +290,9 @@ function parseProxyText(text) {
 
 async function saveProxyLines(lines, label) {
   if (lines.length === 0) return flashStatus('Aucun proxy trouvé.');
-  const { myEmail, accounts } = await loadAll();
+  const { myEmail, accounts, passwordLines } = await loadAll();
   await store.set({ proxyLines: lines });
-  render({ myEmail, accounts, proxyLines: lines });
+  render({ myEmail, accounts, proxyLines: lines, passwordLines });
 
   const extra = lines.length - accounts.length;
   flashStatus(
@@ -274,6 +300,27 @@ async function saveProxyLines(lines, label) {
       (extra > 0 ? ` ${extra} en réserve pour les prochains emails.` : ''),
     3500
   );
+}
+
+// --- Mots de passe (comptes perso / famille) -----------------------------
+// Même principe que les proxies : liste stockée séparément des comptes,
+// associée ligne à ligne. Utilisée par content.js pour se connecter
+// directement au lieu d'inscrire un nouveau compte, quand un mot de passe
+// est connu pour l'email actif.
+function parsePasswordText(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\r$/, ''))
+    .map((l) => l.trim());
+}
+
+async function savePasswordLines(lines, label) {
+  const { myEmail, accounts, proxyLines } = await loadAll();
+  await store.set({ passwordLines: lines });
+  render({ myEmail, accounts, proxyLines, passwordLines: lines });
+
+  const set = lines.filter(Boolean).length;
+  flashStatus(`${label} : ${set} mot(s) de passe associé(s) ligne par ligne.`, 3000);
 }
 
 proxyFileEl.addEventListener('change', (e) => {
@@ -290,10 +337,30 @@ $('saveProxies').addEventListener('click', () => {
 });
 
 $('clearProxies').addEventListener('click', async () => {
-  const { myEmail, accounts } = await loadAll();
+  const { myEmail, accounts, passwordLines } = await loadAll();
   await store.set({ proxyLines: [] });
-  render({ myEmail, accounts, proxyLines: [] });
+  render({ myEmail, accounts, proxyLines: [], passwordLines });
   flashStatus('Liste de proxies vidée.', 1500);
+});
+
+passwordFileEl.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => savePasswordLines(parsePasswordText(reader.result), 'Import');
+  reader.onerror = () => flashStatus('Impossible de lire le fichier.');
+  reader.readAsText(file);
+});
+
+$('savePasswords').addEventListener('click', () => {
+  savePasswordLines(parsePasswordText(passwordTextEl.value), 'Liste enregistrée');
+});
+
+$('clearPasswords').addEventListener('click', async () => {
+  const { myEmail, accounts, proxyLines } = await loadAll();
+  await store.set({ passwordLines: [] });
+  render({ myEmail, accounts, proxyLines, passwordLines: [] });
+  flashStatus('Liste de mots de passe vidée.', 1500);
 });
 
 $('applyProxy').addEventListener('click', async () => {
@@ -344,10 +411,19 @@ $('flushWebhook').addEventListener('click', () => {
 });
 
 // --- Divers -------------------------------------------------------------
+// Nombre de liens du tirage, affiché en direct sur le bouton — dérivé de
+// RAFFLE_LINKS (background.js), jamais recopié en dur ici.
+function refreshRaffleButtonLabel() {
+  chrome.runtime.sendMessage({ type: 'GET_RAFFLE_LINKS' }, (res) => {
+    const count = (res && res.links && res.links.length) || 0;
+    $('openLinks').textContent = count ? `Ouvrir les ${count} liens du tirage` : 'Ouvrir les liens du tirage';
+  });
+}
+
 $('openLinks').addEventListener('click', async () => {
   const { myEmail } = await loadAll();
   chrome.runtime.sendMessage({ type: 'OPEN_RAFFLE_LINKS', email: myEmail }, () =>
-    flashStatus('Ouverture des 7 liens du tirage...')
+    flashStatus('Ouverture des liens du tirage...')
   );
 });
 
